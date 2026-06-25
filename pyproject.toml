@@ -1,0 +1,83 @@
+[project]
+name = "stz-downloader"
+version = "0.1.0"
+description = "A modern, IDM-like download manager powered by aria2."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Daniel" }]
+dependencies = [
+    "PySide6>=6.6",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "httpx>=0.27",
+    "websockets>=12.0",
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+packaging = [
+    "pyinstaller>=6.6",
+]
+
+[project.scripts]
+stz-downloader = "stz_downloader.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stz_downloader"]
+
+# ---------------------------------------------------------------------------
+# Runtime configuration defaults. These are read at startup and can be
+# overridden by a user config file at %APPDATA%/stz-downloader/config.toml
+# ---------------------------------------------------------------------------
+[tool.stz-downloader.aria2]
+# Path to the aria2c binary. "bundled" => use third_party/aria2/aria2c.exe
+binary = "bundled"
+rpc_host = "127.0.0.1"
+rpc_port = 6800
+rpc_secret = "stz-local-secret"
+# Extra aria2 args (split per token)
+extra_args = [
+    "--max-connection-per-server=16",
+    "--split=16",
+    "--min-split-size=1M",
+    "--continue=true",
+    "--auto-file-renaming=true",
+    # Use public resolvers instead of the system DNS (fixes hosts the OS
+    # fails to resolve, e.g. behind some VPNs/firewalls).
+    "--async-dns=true",
+    "--async-dns-server=1.1.1.1,8.8.8.8",
+    # Be resilient to servers that drop connections ("Got EOF from server").
+    "--max-tries=5",
+    "--retry-wait=2",
+    "--connect-timeout=15",
+    "--timeout=30",
+    # Some servers reject too many parallel connections; aria2 backs off,
+    # but keeping a sane default avoids tripping anti-abuse limits.
+    "--lowest-speed-limit=0",
+]
+
+[tool.stz-downloader.server]
+# Local bridge that both the browser extension and the QML UI talk to.
+host = "127.0.0.1"
+port = 8765
+
+[tool.stz-downloader.downloads]
+# Default download directory. Empty => OS Downloads folder.
+directory = ""
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
