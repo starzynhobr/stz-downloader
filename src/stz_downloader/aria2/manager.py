@@ -1,11 +1,13 @@
 """Spawn and supervise the ``aria2c`` RPC subprocess."""
 from __future__ import annotations
 
+import socket
 import subprocess
 import sys
 from pathlib import Path
 
 from ..config import Aria2Config
+from ..config import user_config_dir
 
 
 class Aria2Manager:
@@ -17,7 +19,11 @@ class Aria2Manager:
     def start(self) -> None:
         if self._proc and self._proc.poll() is None:
             return
+        if self._rpc_port_is_open():
+            return
         self.download_dir.mkdir(parents=True, exist_ok=True)
+        session_file = user_config_dir() / "session.txt"
+        session_file.parent.mkdir(parents=True, exist_ok=True)
 
         args = [
             self.cfg.resolve_binary(),
@@ -26,6 +32,9 @@ class Aria2Manager:
             f"--rpc-listen-port={self.cfg.rpc_port}",
             f"--rpc-secret={self.cfg.rpc_secret}",
             f"--dir={self.download_dir}",
+            f"--save-session={session_file}",
+            "--save-session-interval=30",
+            *(["--input-file", str(session_file)] if session_file.exists() else []),
             *self.cfg.extra_args,
         ]
 
@@ -40,6 +49,16 @@ class Aria2Manager:
             stderr=subprocess.DEVNULL,
             creationflags=creationflags,
         )
+        try:
+            self._proc.wait(timeout=0.25)
+        except subprocess.TimeoutExpired:
+            return
+        self._proc = None
+
+    def _rpc_port_is_open(self) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.25)
+            return sock.connect_ex((self.cfg.rpc_host, self.cfg.rpc_port)) == 0
 
     def is_running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None

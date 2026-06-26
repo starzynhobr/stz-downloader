@@ -1,0 +1,29 @@
+{
+  "appName": {
+    "message": "STZ Downloader"
+  },
+  "extName": {
+    "message": "Intégration STZ Downloader"
+  },
+  "extDescription": {
+    "message": "Intercepte les téléchargements du navigateur et les envoie à STZ Downloader."
+  },
+  "interceptDownloads": {
+    "message": "Intercepter les téléchargements"
+  },
+  "statusLabel": {
+    "message": "État"
+  },
+  "statusConnected": {
+    "message": "connecté"
+  },
+  "statusNoAria2": {
+    "message": "sans aria2"
+  },
+  "statusOffline": {
+    "message": "hors ligne"
+  },
+  "contextMenuDownload": {
+    "message": "Télécharger avec STZ Downloader"
+  }
+}

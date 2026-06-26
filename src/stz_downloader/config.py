@@ -22,6 +22,8 @@ APP_NAME = "stz-downloader"
 
 
 def _project_root() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)  # type: ignore[attr-defined]
     # src/stz_downloader/config.py -> project root is two parents up from package
     return Path(__file__).resolve().parents[2]
 

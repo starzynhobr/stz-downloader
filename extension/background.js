@@ -17,6 +17,10 @@ const DEFAULTS = {
   enabled: true, // local quick on/off (popup)
 };
 
+function msg(key) {
+  return api.i18n.getMessage(key) || key;
+}
+
 async function getLocal() {
   const s = await api.storage.local.get(DEFAULTS);
   return { ...DEFAULTS, ...s };
@@ -117,7 +121,7 @@ api.downloads.onCreated.addListener(async (item) => {
 api.runtime.onInstalled.addListener(() => {
   api.contextMenus.create({
     id: "stz-download-link",
-    title: "Baixar com stz downloader",
+    title: msg("contextMenuDownload"),
     contexts: ["link", "video", "audio", "image"],
   });
 });

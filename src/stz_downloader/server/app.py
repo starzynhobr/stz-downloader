@@ -18,7 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+import subprocess
+import sys
 import uuid
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -78,7 +82,26 @@ def _normalize(item: dict) -> dict:
         "speed": int(item.get("downloadSpeed", 0) or 0),
         "progress": (done / total) if total else 0.0,
         "error": item.get("errorMessage", ""),
+        "path": path,
     }
+
+
+def _open_path(path: Path) -> None:
+    if sys.platform == "win32":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
+
+
+def _reveal_path(path: Path) -> None:
+    if sys.platform == "win32":
+        subprocess.Popen(["explorer", f"/select,{path}"])
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path.parent)])
 
 
 def create_app(cfg: Config) -> FastAPI:
@@ -127,6 +150,24 @@ def create_app(cfg: Config) -> FastAPI:
         stopped = await client.tell_stopped(0, 100)
         return [_normalize(i) for i in (*active, *waiting, *stopped)]
 
+    async def _global_stat() -> dict:
+        stat = await client.get_global_stat()
+        return {
+            "downloadSpeed": int(stat.get("downloadSpeed", 0) or 0),
+            "numActive": int(stat.get("numActive", 0) or 0),
+        }
+
+    async def _download_path(gid: str) -> Path:
+        item = await client.tell_status(gid, ["files"])
+        files = item.get("files") or []
+        raw_path = files[0].get("path") if files else ""
+        if not raw_path:
+            raise HTTPException(404, "download path not found")
+        path = Path(raw_path)
+        if not path.exists():
+            raise HTTPException(404, "download file not found")
+        return path
+
     async def _broadcast_loop() -> None:
         while True:
             await asyncio.sleep(1.0)
@@ -137,6 +178,7 @@ def create_app(cfg: Config) -> FastAPI:
                     "type": "downloads",
                     "items": await _snapshot(),
                     "pending": list(pending.values()),
+                    "global": await _global_stat(),
                 }
             except Exception:  # aria2 may be momentarily unavailable
                 continue
@@ -208,7 +250,11 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.get("/api/downloads")
     async def list_downloads() -> dict:
-        return {"items": await _snapshot(), "pending": list(pending.values())}
+        return {
+            "items": await _snapshot(),
+            "pending": list(pending.values()),
+            "global": await _global_stat(),
+        }
 
     @app.post("/api/downloads/{gid}/pause")
     async def pause(gid: str) -> dict:
@@ -221,6 +267,16 @@ def create_app(cfg: Config) -> FastAPI:
     @app.post("/api/downloads/{gid}/cancel")
     async def cancel(gid: str) -> dict:
         return {"gid": await client.remove_any(gid)}
+
+    @app.post("/api/downloads/{gid}/open")
+    async def open_download(gid: str) -> dict:
+        _open_path(await _download_path(gid))
+        return {"ok": True}
+
+    @app.post("/api/downloads/{gid}/reveal")
+    async def reveal_download(gid: str) -> dict:
+        _reveal_path(await _download_path(gid))
+        return {"ok": True}
 
     @app.post("/api/downloads/purge")
     async def purge() -> dict:

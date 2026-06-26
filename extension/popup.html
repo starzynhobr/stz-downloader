@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <style>
@@ -14,9 +14,9 @@
     </style>
   </head>
   <body>
-    <h1>stz downloader</h1>
+    <h1 data-i18n="appName">STZ Downloader</h1>
     <div class="row">
-      <label for="enabled">Interceptar downloads</label>
+      <label for="enabled" data-i18n="interceptDownloads">Intercept downloads</label>
       <input type="checkbox" id="enabled" />
     </div>
     <div class="row">
@@ -24,7 +24,7 @@
       <input type="text" id="bridge" />
     </div>
     <div class="row">
-      <span>Status</span>
+      <span data-i18n="statusLabel">Status</span>
       <span class="status" id="status">…</span>
     </div>
     <script src="popup.js"></script>

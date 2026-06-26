@@ -10,7 +10,7 @@ ApplicationWindow {
     height: 560
     minimumWidth: 680
     minimumHeight: 400
-    title: "stz downloader"
+    title: "STZ Downloader"
     color: "#0f1115"
 
     readonly property color accent: "#4c8dff"
@@ -26,6 +26,16 @@ ApplicationWindow {
         var u = ["B", "KB", "MB", "GB", "TB"]
         var i = Math.floor(Math.log(bytes) / Math.log(1024))
         return (bytes / Math.pow(1024, i)).toFixed(1) + " " + u[i]
+    }
+
+    function fmtDuration(seconds) {
+        seconds = Math.max(0, Math.floor(seconds))
+        var h = Math.floor(seconds / 3600)
+        var m = Math.floor((seconds % 3600) / 60)
+        var s = seconds % 60
+        if (h > 0) return h + "h " + m + "m"
+        if (m > 0) return m + "m " + s + "s"
+        return s + "s"
     }
 
     function statusLabel(s) {
@@ -53,6 +63,7 @@ ApplicationWindow {
         win.requestActivate()
         win.flags = win.flags | Qt.WindowStaysOnTopHint
         topmostTimer.restart()
+        backend.flashTaskbar()
     }
 
     Timer {
@@ -64,6 +75,7 @@ ApplicationWindow {
     Connections {
         target: backend
         function onNewPendingArrived() { win.bringToFront() }
+        function onPendingChanged() { confirmDialog.syncSelection() }
     }
 
     ColumnLayout {
@@ -249,17 +261,38 @@ ApplicationWindow {
                             text: win.fmtSize(modelData.speed) + "/s"
                             color: win.textDim; font.pixelSize: 11
                         }
+                        Text {
+                            visible: modelData.status === "active" && modelData.speed > 0
+                                     && modelData.total > modelData.completed
+                            text: i18n.strings.eta + " "
+                                  + win.fmtDuration((modelData.total - modelData.completed) / modelData.speed)
+                            color: win.textDim; font.pixelSize: 11
+                        }
                         Item { Layout.fillWidth: true }
 
                         ToolBtn {
+                            text: "↗"
+                            tip: i18n.strings.open_file
+                            visible: modelData.status === "complete" && modelData.path && modelData.path.length > 0
+                            onClicked: backend.openDownload(modelData.gid)
+                        }
+                        ToolBtn {
+                            text: "📂"
+                            tip: i18n.strings.reveal_file
+                            visible: modelData.status === "complete" && modelData.path && modelData.path.length > 0
+                            onClicked: backend.revealDownload(modelData.gid)
+                        }
+                        ToolBtn {
                             text: modelData.status === "paused" ? "▶" : "⏸"
                             visible: modelData.status === "active" || modelData.status === "paused"
+                            tip: win.statusLabel(modelData.status === "paused" ? "active" : "paused")
                             onClicked: modelData.status === "paused"
                                        ? backend.resume(modelData.gid)
                                        : backend.pause(modelData.gid)
                         }
                         ToolBtn {
                             text: "✕"
+                            tip: i18n.strings.cancel
                             onClicked: backend.cancel(modelData.gid)
                         }
                     }
@@ -277,12 +310,26 @@ ApplicationWindow {
         }
 
         // --- Status bar ----------------------------------------------
-        Text {
+        RowLayout {
             Layout.fillWidth: true
-            visible: backend.status.length > 0
-            text: backend.status
-            color: "#ff6b6b"
-            font.pixelSize: 11
+            spacing: 12
+            Text {
+                Layout.fillWidth: true
+                visible: backend.status.length > 0
+                text: backend.status
+                color: "#ff6b6b"
+                font.pixelSize: 11
+                elide: Text.ElideRight
+            }
+            Item { Layout.fillWidth: backend.status.length === 0 }
+            Text {
+                visible: (backend.globalStats.numActive || 0) > 0
+                         || (backend.globalStats.downloadSpeed || 0) > 0
+                text: (backend.globalStats.numActive || 0) + " " + i18n.strings.active_downloads
+                      + " · " + win.fmtSize(backend.globalStats.downloadSpeed || 0) + "/s"
+                color: win.textDim
+                font.pixelSize: 11
+            }
         }
     }
 
@@ -454,35 +501,159 @@ ApplicationWindow {
         }
     }
 
-    // ----- Confirmation modal (one pending download at a time) ------
+    // ----- Confirmation modal ---------------------------------------
     Dialog {
         id: confirmDialog
         anchors.centerIn: parent
         modal: true
-        width: Math.min(460, win.width - 60)
+        width: Math.min(520, win.width - 60)
         padding: 20
         closePolicy: Popup.NoAutoClose
         property var item: backend.pending.length > 0 ? backend.pending[0] : null
-        visible: item !== null
+        property var selected: ({})
+        property int selectionVersion: 0
+        readonly property bool batchMode: backend.pending.length > 1
+        visible: backend.pending.length > 0
         background: Rectangle { radius: 14; color: win.surface; border.color: "#2a2f3a" }
+
+        function syncSelection() {
+            var next = {}
+            for (var i = 0; i < backend.pending.length; i++) {
+                var id = backend.pending[i].id
+                next[id] = selected[id] === undefined ? true : selected[id]
+            }
+            selected = next
+            selectionVersion++
+        }
+
+        function isSelected(id) {
+            selectionVersion
+            return selected[id] !== false
+        }
+
+        function setSelected(id, value) {
+            selected[id] = value
+            selectionVersion++
+        }
+
+        function selectedIds() {
+            var ids = []
+            for (var i = 0; i < backend.pending.length; i++) {
+                var id = backend.pending[i].id
+                if (isSelected(id))
+                    ids.push(id)
+            }
+            return ids
+        }
+
+        function selectedCount() {
+            return selectedIds().length
+        }
+
+        function confirmSelected() {
+            var ids = selectedIds()
+            for (var i = 0; i < ids.length; i++)
+                backend.confirmPending(ids[i], dlgConn.value)
+        }
+
+        function cancelSelected() {
+            var ids = selectedIds()
+            for (var i = 0; i < ids.length; i++)
+                backend.cancelPending(ids[i])
+        }
+
+        onVisibleChanged: if (visible) syncSelection()
 
         contentItem: ColumnLayout {
             spacing: 14
             Text {
-                text: i18n.strings.new_download
+                text: confirmDialog.batchMode
+                      ? i18n.strings.new_downloads + " (" + backend.pending.length + ")"
+                      : i18n.strings.new_download
                 color: win.textMain; font.pixelSize: 16; font.bold: true
             }
             Text {
+                visible: !confirmDialog.batchMode
                 Layout.fillWidth: true
                 text: confirmDialog.item ? confirmDialog.item.name : ""
                 color: win.textMain; font.pixelSize: 14
                 elide: Text.ElideMiddle
             }
             Text {
+                visible: !confirmDialog.batchMode
                 text: confirmDialog.item && confirmDialog.item.size > 0
                       ? i18n.strings.size + ": " + win.fmtSize(confirmDialog.item.size)
                       : i18n.strings.size_unknown
                 color: win.textDim; font.pixelSize: 12
+            }
+
+            Rectangle {
+                visible: confirmDialog.batchMode
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(220, pendingList.contentHeight + 2)
+                radius: 8
+                color: "#15181f"
+                border.color: "#2a2f3a"
+
+                ListView {
+                    id: pendingList
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    clip: true
+                    model: backend.pending
+
+                    delegate: ItemDelegate {
+                        required property var modelData
+                        width: pendingList.width
+                        implicitHeight: 44
+                        HoverHandler { cursorShape: Qt.PointingHandCursor }
+                        background: Rectangle {
+                            color: hovered ? win.surfaceAlt : "transparent"
+                            radius: 6
+                        }
+
+                        contentItem: RowLayout {
+                            spacing: 10
+                            CheckBox {
+                                id: pendingCheck
+                                checked: confirmDialog.isSelected(modelData.id)
+                                onToggled: confirmDialog.setSelected(modelData.id, checked)
+                                indicator: Rectangle {
+                                    implicitWidth: 18; implicitHeight: 18; radius: 4
+                                    color: pendingCheck.checked ? win.accent : "transparent"
+                                    border.color: pendingCheck.checked ? win.accent : "#3a4050"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "✓"
+                                        visible: pendingCheck.checked
+                                        color: "white"
+                                        font.pixelSize: 13
+                                    }
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: modelData.name
+                                    color: win.textMain
+                                    font.pixelSize: 13
+                                    elide: Text.ElideMiddle
+                                }
+                                Text {
+                                    text: modelData.size > 0 ? win.fmtSize(modelData.size) : i18n.strings.size_unknown
+                                    color: win.textDim
+                                    font.pixelSize: 10
+                                }
+                            }
+                        }
+                        onClicked: confirmDialog.setSelected(
+                            modelData.id,
+                            !confirmDialog.isSelected(modelData.id)
+                        )
+                    }
+                }
             }
 
             RowLayout {
@@ -507,16 +678,25 @@ ApplicationWindow {
             RowLayout {
                 Layout.fillWidth: true
                 OutlineBtn {
-                    text: i18n.strings.cancel
-                    onClicked: if (confirmDialog.item) backend.cancelPending(confirmDialog.item.id)
+                    enabled: confirmDialog.selectedCount() > 0
+                    text: confirmDialog.batchMode ? i18n.strings.cancel_selected : i18n.strings.cancel
+                    onClicked: {
+                        if (confirmDialog.batchMode)
+                            confirmDialog.cancelSelected()
+                        else if (confirmDialog.item)
+                            backend.cancelPending(confirmDialog.item.id)
+                    }
                 }
                 Item { Layout.fillWidth: true }
                 AccentBtn {
-                    text: i18n.strings.download
+                    enabled: confirmDialog.selectedCount() > 0
+                    text: confirmDialog.batchMode ? i18n.strings.download_selected : i18n.strings.download
                     onClicked: {
                         if (autoChk.checked)
                             backend.saveSettings({ auto_start: true })
-                        if (confirmDialog.item)
+                        if (confirmDialog.batchMode)
+                            confirmDialog.confirmSelected()
+                        else if (confirmDialog.item)
                             backend.confirmPending(confirmDialog.item.id, dlgConn.value)
                     }
                 }
@@ -607,9 +787,12 @@ ApplicationWindow {
     }
 
     component ToolBtn: Button {
+        property string tip: ""
         implicitWidth: 30
         implicitHeight: 24
         HoverHandler { cursorShape: Qt.PointingHandCursor }
+        ToolTip.visible: hovered && tip.length > 0
+        ToolTip.text: tip
         background: Rectangle {
             radius: 6
             color: parent.hovered ? win.surfaceAlt : "transparent"
