@@ -2,9 +2,12 @@ param(
     [string]$Source = "$PSScriptRoot\..\assets\stz-downloader.png",
     [string]$OutDir = "$PSScriptRoot\..\assets",
     [double]$Fill = 1.0,
-    [int]$IconCropX = 70,
-    [int]$IconCropY = 330,
-    [int]$IconCropSize = 520
+    # Square crop that fully CONTAINS the wordmark (x:~60-960, y:~345-760 in the
+    # 1024 source) centered, so nothing is clipped. A previous tight off-center
+    # crop showed only "ST" zoomed in.
+    [int]$IconCropX = 42,
+    [int]$IconCropY = 80,
+    [int]$IconCropSize = 940
 )
 
 $ErrorActionPreference = "Stop"
