@@ -15,6 +15,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from .config import user_config_dir
+from .startup import set_start_with_windows
 
 # IDM-like default categories (extensions worth grabbing). Images and tiny
 # inline assets are intentionally left out so they still open in the browser.
@@ -31,6 +32,8 @@ class Settings(BaseModel):
     intercept_enabled: bool = True       # master on/off for the extension
     auto_start: bool = False             # if False, browser downloads ask first
     intercept_all: bool = False          # ignore the filter and grab everything
+    minimize_to_tray: bool = True        # close/minimize hides to the tray
+    start_with_windows: bool = False     # register in the user's Windows startup
     extensions: list[str] = Field(default_factory=lambda: list(DEFAULT_EXTENSIONS))
     connections: int = 8                 # default segments for new downloads
 
@@ -39,6 +42,8 @@ class SettingsStore:
     def __init__(self, path: Path | None = None):
         self.path = path or (user_config_dir() / "settings.json")
         self.settings = self._load()
+        if self.settings.start_with_windows:
+            set_start_with_windows(True)
 
     def _load(self) -> Settings:
         if self.path.exists():
@@ -55,6 +60,8 @@ class SettingsStore:
             if k in data and v is not None:
                 data[k] = v
         self.settings = Settings(**data)
+        if "start_with_windows" in changes:
+            set_start_with_windows(self.settings.start_with_windows)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.settings.model_dump(), indent=2), "utf-8")
         return self.settings

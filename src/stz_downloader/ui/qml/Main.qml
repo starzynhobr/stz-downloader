@@ -436,6 +436,19 @@ ApplicationWindow {
                 onToggled: (v) => settingsDrawer.s.auto_start = v
             }
             SettingToggle {
+                label: i18n.strings && i18n.strings.minimize_to_tray ? i18n.strings.minimize_to_tray : "Minimizar para a bandeja"
+                sub: i18n.strings && i18n.strings.minimize_to_tray_sub ? i18n.strings.minimize_to_tray_sub : ""
+                checked: settingsDrawer.s.minimize_to_tray === undefined
+                         ? true : settingsDrawer.s.minimize_to_tray
+                onToggled: (v) => settingsDrawer.s.minimize_to_tray = v
+            }
+            SettingToggle {
+                label: i18n.strings && i18n.strings.start_with_windows ? i18n.strings.start_with_windows : "Iniciar com o Windows"
+                sub: i18n.strings && i18n.strings.start_with_windows_sub ? i18n.strings.start_with_windows_sub : ""
+                checked: settingsDrawer.s.start_with_windows || false
+                onToggled: (v) => settingsDrawer.s.start_with_windows = v
+            }
+            SettingToggle {
                 label: i18n.strings.intercept_all
                 sub: i18n.strings.intercept_all_sub
                 checked: settingsDrawer.s.intercept_all || false
@@ -491,6 +504,8 @@ ApplicationWindow {
                         backend.saveSettings({
                             intercept_enabled: settingsDrawer.s.intercept_enabled,
                             auto_start: settingsDrawer.s.auto_start,
+                            minimize_to_tray: settingsDrawer.s.minimize_to_tray,
+                            start_with_windows: settingsDrawer.s.start_with_windows,
                             intercept_all: settingsDrawer.s.intercept_all,
                             extensions: exts
                         })

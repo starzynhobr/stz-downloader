@@ -80,6 +80,7 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(prog="stz-downloader")
     parser.add_argument("--headless", action="store_true", help="run the bridge without the GUI")
+    parser.add_argument("--minimized", action="store_true", help="start hidden in the tray")
     args, _unknown = parser.parse_known_args()
 
     cfg = load_config()
@@ -96,7 +97,7 @@ def main() -> int:
     # GUI imports are deferred so --headless works without a display.
     from .ui import run_ui
 
-    code = run_ui(cfg)
+    code = run_ui(cfg, start_minimized=args.minimized)
     server.should_exit = True
     return code
 

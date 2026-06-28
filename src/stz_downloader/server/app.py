@@ -64,6 +64,8 @@ class SettingsPatch(BaseModel):
     intercept_enabled: bool | None = None
     auto_start: bool | None = None
     intercept_all: bool | None = None
+    minimize_to_tray: bool | None = None
+    start_with_windows: bool | None = None
     extensions: list[str] | None = None
     connections: int | None = None
 
