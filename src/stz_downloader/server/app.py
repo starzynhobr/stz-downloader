@@ -293,12 +293,19 @@ def create_app(cfg: Config) -> FastAPI:
     async def _broadcast_loop() -> None:
         while True:
             await asyncio.sleep(1.0)
-            if not clients:
-                continue
+            # The guard runs whether or not anyone is watching: in --headless
+            # mode the extension queues downloads with no UI attached, and
+            # gating this on connected clients left the disk unprotected
+            # exactly when nobody was there to notice it filling up.
             try:
                 items = await _snapshot()
                 disk = _disk_report(items)
                 await _disk_guard(items, disk)
+            except Exception:  # aria2 may be momentarily unavailable
+                continue
+            if not clients:
+                continue
+            try:
                 payload = {
                     "type": "downloads",
                     "items": items,
