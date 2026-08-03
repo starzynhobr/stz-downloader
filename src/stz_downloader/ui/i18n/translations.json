@@ -48,8 +48,7 @@
     "ext_add_placeholder": "add extension…",
     "ext_duplicate": "%1 is already in the list.",
     "ext_confirm_remove": "Backspace again to remove %1 — Esc cancels.",
-    "support": "Support the project",
-    "support_sub": "Opens stzlabs.com in your browser. Everything stays free either way."
+    "support": "Support the project"
   },
   "pt": {
     "url_placeholder": "Cole uma URL e pressione Enter…",
@@ -100,8 +99,7 @@
     "ext_add_placeholder": "adicionar extensão…",
     "ext_duplicate": "%1 já está na lista.",
     "ext_confirm_remove": "Backspace de novo remove %1 — Esc cancela.",
-    "support": "Apoie o projeto",
-    "support_sub": "Abre stzlabs.com no navegador. Tudo continua gratuito de qualquer forma."
+    "support": "Apoie o projeto"
   },
   "es": {
     "url_placeholder": "Pega una URL y presiona Enter…",
@@ -152,8 +150,7 @@
     "ext_add_placeholder": "añadir extensión…",
     "ext_duplicate": "%1 ya está en la lista.",
     "ext_confirm_remove": "Retroceso otra vez elimina %1 — Esc cancela.",
-    "support": "Apoya el proyecto",
-    "support_sub": "Abre stzlabs.com en tu navegador. Todo sigue siendo gratis igualmente."
+    "support": "Apoya el proyecto"
   },
   "de": {
     "url_placeholder": "URL einfügen und Enter drücken…",
@@ -204,8 +201,7 @@
     "ext_add_placeholder": "Endung hinzufügen…",
     "ext_duplicate": "%1 ist bereits in der Liste.",
     "ext_confirm_remove": "Nochmal Rücktaste entfernt %1 — Esc bricht ab.",
-    "support": "Projekt unterstützen",
-    "support_sub": "Öffnet stzlabs.com im Browser. Alles bleibt so oder so kostenlos."
+    "support": "Projekt unterstützen"
   },
   "fr": {
     "url_placeholder": "Collez une URL et appuyez sur Entrée…",
@@ -256,7 +252,6 @@
     "ext_add_placeholder": "ajouter une extension…",
     "ext_duplicate": "%1 est déjà dans la liste.",
     "ext_confirm_remove": "Retour arrière à nouveau retire %1 — Échap annule.",
-    "support": "Soutenir le projet",
-    "support_sub": "Ouvre stzlabs.com dans le navigateur. Tout reste gratuit dans tous les cas."
+    "support": "Soutenir le projet"
   }
 }

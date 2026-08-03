@@ -813,14 +813,6 @@ ApplicationWindow {
                 }
                 onClicked: Qt.openUrlExternally("https://stzlabs.com/pt/support")
             }
-            Text {
-                text: i18n.strings.support_sub
-                color: win.textDim
-                font.pixelSize: 10
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-            }
         }
             }
 
