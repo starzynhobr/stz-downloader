@@ -783,6 +783,44 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
             }
+
+            Rectangle { Layout.fillWidth: true; height: 1; color: "#2a2f3a" }
+
+            // Voluntary support. Deliberately unlocks nothing: the moment a
+            // donation grants a feature it becomes a digital purchase, which
+            // the Microsoft Store requires to go through its own commerce.
+            Button {
+                Layout.fillWidth: true
+                implicitHeight: 38
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                background: Rectangle {
+                    radius: 8
+                    color: parent.hovered ? win.surface : "transparent"
+                    border.color: parent.hovered ? "#ff6b6b" : "#2a2f3a"
+                    Behavior on color { ColorAnimation { duration: 90 } }
+                }
+                contentItem: RowLayout {
+                    spacing: 8
+                    Item { Layout.fillWidth: true }
+                    Text { text: "♥"; color: "#ff6b6b"; font.pixelSize: 13 }
+                    Text {
+                        text: i18n.strings.support
+                        color: win.textMain
+                        font.pixelSize: 12
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+                onClicked: Qt.openUrlExternally("https://stzlabs.com/pt/support")
+            }
+            Text {
+                text: i18n.strings.support_sub
+                color: win.textDim
+                font.pixelSize: 10
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+            }
         }
             }
 

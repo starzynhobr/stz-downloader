@@ -47,7 +47,9 @@
     "disk_paused": "Paused: %1 is out of space. Free some up and they resume automatically.",
     "ext_add_placeholder": "add extension…",
     "ext_duplicate": "%1 is already in the list.",
-    "ext_confirm_remove": "Backspace again to remove %1 — Esc cancels."
+    "ext_confirm_remove": "Backspace again to remove %1 — Esc cancels.",
+    "support": "Support the project",
+    "support_sub": "Opens stzlabs.com in your browser. Everything stays free either way."
   },
   "pt": {
     "url_placeholder": "Cole uma URL e pressione Enter…",
@@ -97,7 +99,9 @@
     "disk_paused": "Pausado: %1 está sem espaço. Libere espaço e os downloads retomam sozinhos.",
     "ext_add_placeholder": "adicionar extensão…",
     "ext_duplicate": "%1 já está na lista.",
-    "ext_confirm_remove": "Backspace de novo remove %1 — Esc cancela."
+    "ext_confirm_remove": "Backspace de novo remove %1 — Esc cancela.",
+    "support": "Apoie o projeto",
+    "support_sub": "Abre stzlabs.com no navegador. Tudo continua gratuito de qualquer forma."
   },
   "es": {
     "url_placeholder": "Pega una URL y presiona Enter…",
@@ -147,7 +151,9 @@
     "disk_paused": "En pausa: %1 se quedó sin espacio. Libera espacio y se reanudarán solas.",
     "ext_add_placeholder": "añadir extensión…",
     "ext_duplicate": "%1 ya está en la lista.",
-    "ext_confirm_remove": "Retroceso otra vez elimina %1 — Esc cancela."
+    "ext_confirm_remove": "Retroceso otra vez elimina %1 — Esc cancela.",
+    "support": "Apoya el proyecto",
+    "support_sub": "Abre stzlabs.com en tu navegador. Todo sigue siendo gratis igualmente."
   },
   "de": {
     "url_placeholder": "URL einfügen und Enter drücken…",
@@ -197,7 +203,9 @@
     "disk_paused": "Pausiert: Auf %1 ist kein Platz mehr. Schaffen Sie Platz, dann geht es automatisch weiter.",
     "ext_add_placeholder": "Endung hinzufügen…",
     "ext_duplicate": "%1 ist bereits in der Liste.",
-    "ext_confirm_remove": "Nochmal Rücktaste entfernt %1 — Esc bricht ab."
+    "ext_confirm_remove": "Nochmal Rücktaste entfernt %1 — Esc bricht ab.",
+    "support": "Projekt unterstützen",
+    "support_sub": "Öffnet stzlabs.com im Browser. Alles bleibt so oder so kostenlos."
   },
   "fr": {
     "url_placeholder": "Collez une URL et appuyez sur Entrée…",
@@ -247,6 +255,8 @@
     "disk_paused": "En pause : %1 n'a plus d'espace. Libérez de la place, la reprise est automatique.",
     "ext_add_placeholder": "ajouter une extension…",
     "ext_duplicate": "%1 est déjà dans la liste.",
-    "ext_confirm_remove": "Retour arrière à nouveau retire %1 — Échap annule."
+    "ext_confirm_remove": "Retour arrière à nouveau retire %1 — Échap annule.",
+    "support": "Soutenir le projet",
+    "support_sub": "Ouvre stzlabs.com dans le navigateur. Tout reste gratuit dans tous les cas."
   }
 }
