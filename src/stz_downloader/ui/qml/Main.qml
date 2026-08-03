@@ -42,6 +42,12 @@ ApplicationWindow {
         return i18n.strings["status_" + s] || s
     }
 
+    // Minimal %1/%2 placeholder substitution for translated strings.
+    function fmt(template, a, b) {
+        return (template || "").replace("%1", a === undefined ? "" : a)
+                               .replace("%2", b === undefined ? "" : b)
+    }
+
     function submit() {
         var u = urlField.text.trim()
         if (u.length > 0) {
@@ -174,6 +180,49 @@ ApplicationWindow {
                     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                 }
                 onClicked: settingsDrawer.open()
+            }
+        }
+
+        // --- Disk warning banner -------------------------------------
+        // Advisory, never blocking: Content-Length lies, and the user may be
+        // about to free space. Amber for "you will run short", red once the
+        // guard has actually paused things.
+        Rectangle {
+            id: diskBanner
+            readonly property var d: backend.disk
+            readonly property bool tripped: d.available === true && d.guardTripped === true
+            readonly property bool short_: d.available === true && (d.shortfall || 0) > 0
+
+            Layout.fillWidth: true
+            visible: tripped || short_
+            implicitHeight: diskText.implicitHeight + 20
+            radius: 10
+            color: tripped ? "#3a1c1c" : "#3a331c"
+            border.color: tripped ? "#ff6b6b" : "#e0b341"
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 14
+                anchors.rightMargin: 14
+                spacing: 10
+
+                Text {
+                    text: diskBanner.tripped ? "⛔" : "⚠"
+                    font.pixelSize: 15
+                    color: diskBanner.tripped ? "#ff6b6b" : "#e0b341"
+                }
+                Text {
+                    id: diskText
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 12
+                    color: diskBanner.tripped ? "#ffb4b4" : "#e8d7a0"
+                    text: diskBanner.tripped
+                          ? win.fmt(i18n.strings.disk_paused, diskBanner.d.path)
+                          : win.fmt(i18n.strings.disk_short,
+                                    win.fmtSize(diskBanner.d.shortfall || 0),
+                                    diskBanner.d.path)
+                }
             }
         }
 
@@ -336,23 +385,148 @@ ApplicationWindow {
     // ----- Settings drawer ------------------------------------------
     Drawer {
         id: settingsDrawer
+        objectName: "settingsDrawer"
         edge: Qt.RightEdge
         width: Math.min(360, win.width)
         height: win.height
         background: Rectangle { color: win.surfaceAlt }
 
         property var s: ({})
-        onOpened: s = JSON.parse(JSON.stringify(backend.settings))
+        // Bumped on every edit to `s`. QML can't observe mutations of a plain
+        // JS object, so bindings that read `s` reference this to re-evaluate.
+        property int sVersion: 0
+        // False until the bridge has actually delivered settings; gates Save.
+        property bool settingsReady: false
 
+        function loadFrom(source) {
+            s = JSON.parse(JSON.stringify(source))
+            sVersion++
+            extList = (s.extensions || []).slice()
+            extVersion++
+            extWarning = ""
+            settingsReady = Object.keys(s).length > 0
+        }
+
+        onOpened: loadFrom(backend.settings)
+
+        // If settings arrive while the drawer is already open (slow bridge on
+        // startup), adopt them instead of leaving the user with a dead Save.
+        Connections {
+            target: backend
+            enabled: settingsDrawer.opened && !settingsDrawer.settingsReady
+            function onSettingsChanged() { settingsDrawer.loadFrom(backend.settings) }
+        }
+
+        function setS(key, value) {
+            s[key] = value
+            sVersion++
+        }
+
+        function getS(key, fallback) {
+            sVersion
+            return s[key] === undefined ? fallback : s[key]
+        }
+
+        // --- extension list, edited as pills -------------------------
+        property var extList: []
+        property int extVersion: 0
+        property string extWarning: ""
+        // Index of the pill Backspace has *selected* but not yet deleted.
+        // A tag field that deletes on the first Backspace loses entries before
+        // the user realises what happened, so removal takes two presses.
+        property int extArmed: -1
+
+        function disarmExt() {
+            if (extArmed !== -1) {
+                extArmed = -1
+                extVersion++
+            }
+        }
+
+        function normalizeExt(raw) {
+            var e = raw.trim().toLowerCase()
+            if (e.length === 0) return ""
+            if (e[0] !== ".") e = "." + e
+            return e
+        }
+
+        // Returns true when it actually added something. Duplicates are
+        // rejected with a message rather than silently swallowed -- otherwise
+        // typing an extension that is already there looks like a broken field.
+        function addExt(raw) {
+            var e = normalizeExt(raw)
+            if (e.length <= 1) return false
+            if (extList.indexOf(e) !== -1) {
+                extWarning = win.fmt(i18n.strings.ext_duplicate, e)
+                dupTimer.restart()
+                return false
+            }
+            extList.push(e)
+            extVersion++
+            extWarning = ""
+            return true
+        }
+
+        function removeExtAt(i) {
+            extList.splice(i, 1)
+            extArmed = -1
+            extVersion++
+            extWarning = ""
+        }
+
+        // Backspace on an empty field: first press selects the last pill,
+        // second press removes it. Returns true when the key was consumed.
+        function backspaceExt() {
+            if (extList.length === 0)
+                return false
+            var last = extList.length - 1
+            if (extArmed === last) {
+                removeExtAt(last)
+            } else {
+                extArmed = last
+                extVersion++
+            }
+            return true
+        }
+
+        // Commits everything before the last comma, leaving any trailing
+        // partial token in the field so typing flows uninterrupted.
+        function commitTokens(text, keepTail) {
+            var parts = text.split(",")
+            var tail = keepTail ? parts.pop() : ""
+            for (var i = 0; i < parts.length; i++)
+                addExt(parts[i])
+            return tail
+        }
+
+        Timer { id: dupTimer; interval: 2600; onTriggered: settingsDrawer.extWarning = "" }
+
+        // Outer layout: a scrollable body plus a button row pinned to the
+        // bottom. Without this the ColumnLayout squashed its children on a
+        // short window and pushed Save outside the drawer, where it silently
+        // could not be clicked -- settings looked toggled but never saved.
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 20
-            spacing: 16
+            spacing: 12
 
             Text {
                 text: i18n.strings.settings
                 color: win.textMain; font.pixelSize: 18; font.bold: true
             }
+
+            ScrollView {
+                id: drawerScroll
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+        ColumnLayout {
+            width: drawerScroll.availableWidth
+            spacing: 16
 
             // language dropdown
             Text { text: i18n.strings.language; color: win.textDim; font.pixelSize: 12 }
@@ -426,54 +600,194 @@ ApplicationWindow {
 
             SettingToggle {
                 label: i18n.strings.intercept_enabled
-                checked: settingsDrawer.s.intercept_enabled || false
-                onToggled: (v) => settingsDrawer.s.intercept_enabled = v
+                checked: settingsDrawer.getS("intercept_enabled", true)
+                onToggled: (v) => settingsDrawer.setS("intercept_enabled", v)
             }
             SettingToggle {
                 label: i18n.strings.auto_start
                 sub: i18n.strings.auto_start_sub
-                checked: settingsDrawer.s.auto_start || false
-                onToggled: (v) => settingsDrawer.s.auto_start = v
+                checked: settingsDrawer.getS("auto_start", false)
+                onToggled: (v) => settingsDrawer.setS("auto_start", v)
             }
             SettingToggle {
                 label: i18n.strings.intercept_all
                 sub: i18n.strings.intercept_all_sub
-                checked: settingsDrawer.s.intercept_all || false
-                onToggled: (v) => settingsDrawer.s.intercept_all = v
+                checked: settingsDrawer.getS("intercept_all", false)
+                onToggled: (v) => settingsDrawer.setS("intercept_all", v)
+            }
+            SettingToggle {
+                label: i18n.strings.clipboard_enabled
+                sub: i18n.strings.clipboard_sub
+                checked: settingsDrawer.getS("clipboard_enabled", false)
+                onToggled: (v) => settingsDrawer.setS("clipboard_enabled", v)
+            }
+            SettingToggle {
+                label: i18n.strings.disk_guard
+                sub: i18n.strings.disk_guard_sub
+                checked: settingsDrawer.getS("disk_guard_enabled", true)
+                onToggled: (v) => settingsDrawer.setS("disk_guard_enabled", v)
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                enabled: settingsDrawer.getS("disk_guard_enabled", true)
+                opacity: enabled ? 1.0 : 0.4
+                Text {
+                    text: i18n.strings.disk_reserve
+                    color: win.textDim; font.pixelSize: 12
+                }
+                Item { Layout.fillWidth: true }
+                StepBtn {
+                    text: "−"
+                    onClicked: settingsDrawer.setS("disk_reserve_mb",
+                        Math.max(0, settingsDrawer.getS("disk_reserve_mb", 2048) - 512))
+                }
+                Text {
+                    text: settingsDrawer.getS("disk_reserve_mb", 2048)
+                    color: win.textMain; font.pixelSize: 13
+                    horizontalAlignment: Text.AlignHCenter
+                    Layout.preferredWidth: 46
+                }
+                StepBtn {
+                    text: "+"
+                    onClicked: settingsDrawer.setS("disk_reserve_mb",
+                        Math.min(51200, settingsDrawer.getS("disk_reserve_mb", 2048) + 512))
+                }
             }
 
-            Text {
-                text: i18n.strings.intercepted_ext
-                color: win.textDim; font.pixelSize: 12
+            RowLayout {
+                Layout.fillWidth: true
+                Text {
+                    text: i18n.strings.intercepted_ext
+                    color: win.textDim; font.pixelSize: 12
+                }
+                Item { Layout.fillWidth: true }
+                Text {
+                    text: settingsDrawer.extVersion, settingsDrawer.extList.length
+                    color: win.textDim; font.pixelSize: 11
+                }
             }
+
+            // Extensions as removable pills. Typing a comma (or Enter) commits
+            // the token, mirroring how tag inputs behave on the web.
             Rectangle {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
+                implicitHeight: extFlow.implicitHeight + 16
                 radius: 8
                 color: win.surface
-                border.color: "#2a2f3a"
-                opacity: settingsDrawer.s.intercept_all ? 0.4 : 1.0
+                border.color: extInput.activeFocus ? win.accent : "#2a2f3a"
+                enabled: !settingsDrawer.getS("intercept_all", false)
+                opacity: enabled ? 1.0 : 0.4
 
-                ScrollView {
+                MouseArea {
                     anchors.fill: parent
+                    onClicked: extInput.forceActiveFocus()
+                }
+
+                Flow {
+                    id: extFlow
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
                     anchors.margins: 8
-                    clip: true
-                    TextArea {
-                        id: extArea
-                        enabled: !settingsDrawer.s.intercept_all
+                    spacing: 6
+
+                    Repeater {
+                        model: settingsDrawer.extVersion, settingsDrawer.extList
+
+                        delegate: Rectangle {
+                            required property string modelData
+                            required property int index
+                            readonly property bool armed: settingsDrawer.extArmed === index
+                            height: 24
+                            width: pillRow.implicitWidth + 16
+                            radius: 12
+                            color: armed ? "#4a2226" : win.surfaceAlt
+                            border.color: armed ? "#ff6b6b" : "#3a4050"
+                            Behavior on color { ColorAnimation { duration: 90 } }
+
+                            RowLayout {
+                                id: pillRow
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Text {
+                                    text: modelData
+                                    color: armed ? "#ffb4b4" : win.textMain
+                                    font.pixelSize: 11
+                                }
+                                Text {
+                                    text: "✕"
+                                    color: removeHover.hovered ? "#ff6b6b" : win.textDim
+                                    font.pixelSize: 11
+                                    HoverHandler { id: removeHover; cursorShape: Qt.PointingHandCursor }
+                                    TapHandler {
+                                        onTapped: settingsDrawer.removeExtAt(index)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    TextField {
+                        id: extInput
+                        width: Math.max(90, extFlow.width - 8)
+                        height: 24
+                        verticalAlignment: TextInput.AlignVCenter
+                        placeholderText: i18n.strings.ext_add_placeholder
+                        placeholderTextColor: win.textDim
                         color: win.textMain
-                        wrapMode: TextEdit.WordWrap
-                        text: (settingsDrawer.s.extensions || []).join(", ")
+                        font.pixelSize: 11
                         background: Item {}
                         selectByMouse: true
+
+                        // Comma commits; this also handles a pasted list.
+                        onTextChanged: {
+                            settingsDrawer.disarmExt()
+                            if (text.indexOf(",") !== -1)
+                                text = settingsDrawer.commitTokens(text, true)
+                        }
+                        onAccepted: {
+                            if (settingsDrawer.addExt(text))
+                                text = ""
+                        }
+                        onActiveFocusChanged: if (!activeFocus) settingsDrawer.disarmExt()
+
+                        Keys.onPressed: (event) => {
+                            if (event.key === Qt.Key_Backspace && text.length === 0) {
+                                event.accepted = settingsDrawer.backspaceExt()
+                                return
+                            }
+                            // Escape cancels a pending deletion rather than
+                            // leaving a pill sitting there looking doomed.
+                            if (event.key === Qt.Key_Escape
+                                    && settingsDrawer.extArmed !== -1) {
+                                settingsDrawer.disarmExt()
+                                event.accepted = true
+                                return
+                            }
+                            settingsDrawer.disarmExt()
+                        }
                     }
                 }
             }
             Text {
-                text: i18n.strings.ext_hint
-                color: win.textDim; font.pixelSize: 10
+                readonly property bool armed: (settingsDrawer.extVersion,
+                                               settingsDrawer.extArmed) !== -1
+                text: armed
+                      ? win.fmt(i18n.strings.ext_confirm_remove,
+                                settingsDrawer.extList[settingsDrawer.extArmed])
+                      : settingsDrawer.extWarning.length > 0
+                        ? settingsDrawer.extWarning : i18n.strings.ext_hint
+                color: armed ? "#ff6b6b"
+                     : settingsDrawer.extWarning.length > 0 ? "#e0b341" : win.textDim
+                font.pixelSize: 10
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+        }
             }
 
+            // Pinned to the bottom: always reachable no matter how short the
+            // window is, and no longer part of the scrolling content.
             RowLayout {
                 Layout.fillWidth: true
                 OutlineBtn {
@@ -483,16 +797,23 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 AccentBtn {
                     text: i18n.strings.save
+                    // Opening the drawer before the bridge has answered would
+                    // leave `s` empty, and saving then would write defaults
+                    // over the user's real settings -- wiping the filter list.
+                    enabled: settingsDrawer.settingsReady
+                    opacity: enabled ? 1.0 : 0.5
                     onClicked: {
-                        var exts = extArea.text.split(",")
-                            .map((e) => e.trim().toLowerCase())
-                            .filter((e) => e.length > 0)
-                            .map((e) => e[0] === "." ? e : "." + e)
+                        // Commit whatever is still sitting in the input.
+                        settingsDrawer.addExt(extInput.text)
+                        extInput.text = ""
                         backend.saveSettings({
-                            intercept_enabled: settingsDrawer.s.intercept_enabled,
-                            auto_start: settingsDrawer.s.auto_start,
-                            intercept_all: settingsDrawer.s.intercept_all,
-                            extensions: exts
+                            intercept_enabled: settingsDrawer.getS("intercept_enabled", true),
+                            auto_start: settingsDrawer.getS("auto_start", false),
+                            intercept_all: settingsDrawer.getS("intercept_all", false),
+                            clipboard_enabled: settingsDrawer.getS("clipboard_enabled", false),
+                            disk_guard_enabled: settingsDrawer.getS("disk_guard_enabled", true),
+                            disk_reserve_mb: settingsDrawer.getS("disk_reserve_mb", 2048),
+                            extensions: settingsDrawer.extList.slice()
                         })
                         settingsDrawer.close()
                     }
