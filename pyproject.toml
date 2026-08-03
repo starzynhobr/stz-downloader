@@ -51,6 +51,11 @@ extra_args = [
     "--split=16",
     "--min-split-size=1M",
     "--continue=true",
+    # aria2's Windows default is prealloc: it writes zeros across the whole
+    # file before fetching a single byte. On a 100+ GB download that means
+    # many minutes at 0 B/s with the RPC thread blocked (UI frozen, pause
+    # button unresponsive). "none" is what IDM does -- start immediately.
+    "--file-allocation=none",
     "--auto-file-renaming=true",
     # Use public resolvers instead of the system DNS (fixes hosts the OS
     # fails to resolve, e.g. behind some VPNs/firewalls).
