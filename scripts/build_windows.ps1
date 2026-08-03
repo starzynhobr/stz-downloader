@@ -12,6 +12,7 @@ $spec = Join-Path $dist "pyinstaller-spec"
 $src = Join-Path $root "src"
 $qml = Join-Path $root "src\stz_downloader\ui\qml"
 $i18n = Join-Path $root "src\stz_downloader\ui\i18n"
+$assets = Join-Path $root "assets"
 $aria2Exe = Join-Path $root "third_party\aria2\aria2c.exe"
 $aria2License = Join-Path $root "third_party\aria2\LICENSE"
 $aria2Source = Join-Path $root "third_party\aria2\SOURCE.md"
@@ -37,10 +38,12 @@ try {
         --specpath $spec `
         --add-data "${qml};stz_downloader\ui\qml" `
         --add-data "${i18n};stz_downloader\ui\i18n" `
+        --add-data "${assets};Assets" `
         --add-binary "${aria2Exe};third_party\aria2" `
         --add-data "${aria2License};third_party\aria2" `
         --add-data "${aria2Source};third_party\aria2" `
         --hidden-import PySide6.QtWebSockets `
+        --hidden-import PySide6.QtWidgets `
         --collect-submodules uvicorn `
         --collect-submodules websockets `
         --collect-submodules httptools `

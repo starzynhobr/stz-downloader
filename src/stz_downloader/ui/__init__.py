@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QUrl, qInstallMessageHandler
+from PySide6.QtCore import QCoreApplication, Qt, QUrl, qInstallMessageHandler
 from PySide6.QtGui import QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication
@@ -66,7 +66,7 @@ def _app_icon_path() -> Path | None:
     return None
 
 
-def run_ui(cfg: Config) -> int:
+def run_ui(cfg: Config, start_minimized: bool = False) -> int:
     _configure_qt_paths()
     qInstallMessageHandler(_qt_message_handler)
     logging.info("Starting UI with QML dir %s", QML_DIR)
@@ -135,6 +135,24 @@ def run_ui(cfg: Config) -> int:
     # decides whether a close hides or quits; this stops Qt quitting first.
     app.setQuitOnLastWindowClosed(tray is None)
     backend.focusRequested.connect(show_window)
+
+    # Minimising should reach the tray too, not just closing. QML owns the
+    # close path; the minimise path is only observable from here.
+    def hide_if_minimized() -> None:
+        if not tray:
+            return
+        try:
+            minimized = bool(window.windowState() & Qt.WindowState.WindowMinimized)
+        except TypeError:  # some platforms report an unrelated state type
+            return
+        if minimized and backend.settings.get("minimize_to_tray", True):
+            window.hide()
+
+    window.windowStateChanged.connect(lambda _state: hide_if_minimized())
+
+    # Launched at login: come up in the tray rather than stealing focus.
+    if start_minimized and tray:
+        window.hide()
 
     def on_quit() -> None:
         if tray:

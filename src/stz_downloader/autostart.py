@@ -21,14 +21,17 @@ def supported() -> bool:
 
 
 def launch_command() -> str:
-    """The command Windows should run at login, quoted for the registry."""
+    """The command Windows should run at login, quoted for the registry.
+
+    ``--minimized`` so signing in doesn't throw a window in the user's face.
+    """
     if getattr(sys, "frozen", False):
-        return f'"{sys.executable}"'
+        return f'"{sys.executable}" --minimized'
     # Running from source: prefer pythonw so login doesn't flash a console.
     exe = Path(sys.executable)
     windowless = exe.with_name("pythonw.exe")
     interpreter = windowless if windowless.exists() else exe
-    return f'"{interpreter}" -m stz_downloader'
+    return f'"{interpreter}" -m stz_downloader --minimized'
 
 
 def is_enabled() -> bool:

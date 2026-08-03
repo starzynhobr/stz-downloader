@@ -8,7 +8,7 @@
   "host_permissions": ["<all_urls>", "http://127.0.0.1:8765/*"],
   "browser_specific_settings": {
     "gecko": {
-      "id": "stz-downloader@local",
+      "id": "stz-downloader@stzlabs.com",
       "strict_min_version": "115.0"
     }
   },
