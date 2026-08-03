@@ -1,10 +1,18 @@
+# Generate the MSIX tile assets and the app .ico from one square source image.
+#
+# By default the whole source is used. The crop parameters exist only for a
+# source that is not already composed as a square -- a hardcoded crop window
+# silently clipped the logo ("Downloader" came out as "Down") in every derived
+# asset, including the .ico shown in the window title bar.
 param(
     [string]$Source = "$PSScriptRoot\..\assets\stz-downloader.png",
     [string]$OutDir = "$PSScriptRoot\..\assets",
     [double]$Fill = 1.0,
-    [int]$IconCropX = 70,
-    [int]$IconCropY = 330,
-    [int]$IconCropSize = 520
+    [int]$IconCropX = 0,
+    [int]$IconCropY = 0,
+    # 0 => use the largest centred square the source allows (the whole image
+    # when it is already square).
+    [int]$IconCropSize = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,6 +34,19 @@ $targets = @(
 
 $src = [System.Drawing.Image]::FromFile((Resolve-Path $Source))
 try {
+    if ($IconCropSize -le 0) {
+        $IconCropSize = [Math]::Min($src.Width, $src.Height)
+        $IconCropX = [int](($src.Width - $IconCropSize) / 2)
+        $IconCropY = [int](($src.Height - $IconCropSize) / 2)
+    }
+    if ($IconCropX -lt 0 -or $IconCropY -lt 0 -or
+        ($IconCropX + $IconCropSize) -gt $src.Width -or
+        ($IconCropY + $IconCropSize) -gt $src.Height) {
+        throw ("Crop ${IconCropSize}px at ($IconCropX,$IconCropY) falls outside " +
+               "the $($src.Width)x$($src.Height) source. Anything outside the " +
+               "source would be clipped from every generated asset.")
+    }
+    Write-Host "Source $($src.Width)x$($src.Height); using ${IconCropSize}px square at ($IconCropX,$IconCropY)"
     $crop = [System.Drawing.Rectangle]::new($IconCropX, $IconCropY, $IconCropSize, $IconCropSize)
     $icoFrames = New-Object System.Collections.Generic.List[System.Drawing.Bitmap]
     foreach ($target in $targets) {
