@@ -34,6 +34,18 @@ class Settings(BaseModel):
     extensions: list[str] = Field(default_factory=lambda: list(DEFAULT_EXTENSIONS))
     connections: int = 8                 # default segments for new downloads
 
+    # Watch the clipboard and offer to grab copied links. Off by default: it
+    # means reading everything the user copies, so it must be a deliberate
+    # choice. Only URLs matching the filter above are ever acted on, and
+    # non-matching clipboard content is never stored or logged.
+    clipboard_enabled: bool = False
+
+    # Pause every active download when the destination volume is about to run
+    # out, instead of letting aria2 hit ENOSPC. With --continue=true a paused
+    # download resumes byte-exact once space is freed, so nothing is lost.
+    disk_guard_enabled: bool = True
+    disk_reserve_mb: int = 2048          # keep this much free for the OS
+
 
 class SettingsStore:
     def __init__(self, path: Path | None = None):

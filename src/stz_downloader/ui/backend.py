@@ -23,7 +23,8 @@ from ..config import Config
 class _Worker(QObject):
     """Lives on the worker thread; does every network call."""
 
-    downloads = Signal(object, object, object, bool)  # items, pending, global, pending_grew
+    # items, pending, global, disk, pending_grew
+    downloads = Signal(object, object, object, object, bool)
     settingsLoaded = Signal(object)
     failed = Signal(str)
 
@@ -37,6 +38,7 @@ class _Worker(QObject):
         self._prev_pending = 0
         self._ws_connected = False
         self._ws_connecting = False
+        self._known_settings: dict | None = None
 
     @Slot()
     def begin(self) -> None:
@@ -67,10 +69,24 @@ class _Worker(QObject):
             self._http.close()
 
     def _emit_downloads(self, data: dict) -> None:
+        # Every payload carries the current settings. Adopting them here is
+        # what makes the UI self-heal: the one-shot load in begin() races the
+        # bridge coming up, and when it lost, settings-driven features (the
+        # clipboard watcher) stayed silently switched off forever.
+        settings = data.get("settings")
+        if settings and settings != self._known_settings:
+            self._publish_settings(settings)
+
         pending = data.get("pending", [])
         grew = len(pending) > self._prev_pending
         self._prev_pending = len(pending)
-        self.downloads.emit(data.get("items", []), pending, data.get("global", {}), grew)
+        self.downloads.emit(
+            data.get("items", []),
+            pending,
+            data.get("global", {}),
+            data.get("disk", {}),
+            grew,
+        )
 
     @Slot()
     def _poll(self) -> None:
@@ -116,10 +132,16 @@ class _Worker(QObject):
 
     @Slot()
     def _load_settings(self) -> None:
+        """Fast path only. A failure here is not fatal -- the periodic payload
+        carries settings too, so the UI converges either way."""
         try:
-            self.settingsLoaded.emit(self._http.get(f"{self._base}/api/settings").json())
+            self._publish_settings(self._http.get(f"{self._base}/api/settings").json())
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
+
+    def _publish_settings(self, settings: dict) -> None:
+        self._known_settings = settings
+        self.settingsLoaded.emit(settings)
 
     @Slot(str, object)
     def post(self, path: str, payload: object) -> None:
@@ -132,9 +154,7 @@ class _Worker(QObject):
     @Slot(str, object)
     def put_settings(self, path: str, payload: object) -> None:
         try:
-            self.settingsLoaded.emit(
-                self._http.put(f"{self._base}{path}", json=payload).json()
-            )
+            self._publish_settings(self._http.put(f"{self._base}{path}", json=payload).json())
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
 
@@ -143,6 +163,7 @@ class Backend(QObject):
     downloadsChanged = Signal()
     pendingChanged = Signal()
     globalChanged = Signal()
+    diskChanged = Signal()
     newPendingArrived = Signal()
     settingsChanged = Signal()
     statusChanged = Signal(str)
@@ -157,8 +178,19 @@ class Backend(QObject):
         self._items: list[dict] = []
         self._pending: list[dict] = []
         self._global: dict = {}
+        self._disk: dict = {}
         self._settings: dict = {}
         self._status = ""
+        self._last_clip = ""
+        self._last_serial: int | None = None
+
+        # Clipboard polling. Qt's dataChanged signal is unreliable on Windows
+        # (it can fire late, repeatedly, or not at all for other processes), so
+        # a slow poll is the dependable approach. 800 ms feels instant without
+        # burning CPU.
+        self._clip_timer = QTimer(self)
+        self._clip_timer.setInterval(800)
+        self._clip_timer.timeout.connect(self._check_clipboard)
 
         self._thread = QThread()
         self._worker = _Worker(base)
@@ -182,6 +214,10 @@ class Backend(QObject):
     @Property("QVariantMap", notify=globalChanged)
     def globalStats(self):  # noqa: N802
         return self._global
+
+    @Property("QVariantMap", notify=diskChanged)
+    def disk(self):
+        return self._disk
 
     @Property("QVariantMap", notify=settingsChanged)
     def settings(self):
@@ -208,6 +244,7 @@ class Backend(QObject):
 
     @Slot()
     def stop(self) -> None:
+        self._clip_timer.stop()
         # Ask the worker to release its resources, then stop the thread.
         if self._thread.isRunning():
             self._worker.stop()
@@ -215,12 +252,15 @@ class Backend(QObject):
             self._thread.wait(2000)
 
     # -- worker callbacks (run on the GUI thread) -----------------------
-    @Slot(object, object, object, bool)
-    def _on_downloads(self, items, pending, global_stats, grew) -> None:
+    @Slot(object, object, object, object, bool)
+    def _on_downloads(self, items, pending, global_stats, disk, grew) -> None:
         self._items = items
         self._global = global_stats
         self.downloadsChanged.emit()
         self.globalChanged.emit()
+        if disk != self._disk:
+            self._disk = disk
+            self.diskChanged.emit()
         if pending != self._pending:
             self._pending = pending
             self.pendingChanged.emit()
@@ -232,6 +272,62 @@ class Backend(QObject):
     def _on_settings(self, settings) -> None:
         self._settings = settings
         self.settingsChanged.emit()
+        # The clipboard is only ever read while the user has opted in, so the
+        # timer itself is what the toggle controls -- not a filter downstream.
+        if settings.get("clipboard_enabled"):
+            if not self._clip_timer.isActive():
+                # Adopt whatever is already on the clipboard as the baseline so
+                # enabling the setting doesn't immediately re-offer an old link.
+                self._last_serial = self._clipboard_serial()
+                self._last_clip = self._clipboard_text()
+                self._clip_timer.start()
+        else:
+            self._clip_timer.stop()
+            self._last_clip = ""
+            self._last_serial = None
+
+    def _clipboard_text(self) -> str:
+        clipboard = QGuiApplication.clipboard()
+        return clipboard.text().strip() if clipboard else ""
+
+    def _clipboard_serial(self) -> int | None:
+        """Windows' clipboard sequence number, or None where unavailable.
+
+        It increments on every copy, even when the copied text is identical.
+        Comparing text alone cannot tell "the link is still on the clipboard"
+        apart from "the user copied that same link again", so re-copying a
+        link would silently do nothing.
+        """
+        if sys.platform != "win32":
+            return None
+        try:
+            return int(ctypes.windll.user32.GetClipboardSequenceNumber())
+        except Exception:  # noqa: BLE001 -- fall back to text comparison
+            return None
+
+    @Slot()
+    def _check_clipboard(self) -> None:
+        serial = self._clipboard_serial()
+        if serial is not None:
+            if serial == self._last_serial:
+                return
+            self._last_serial = serial
+            # Only now is the clipboard actually opened -- which also stops
+            # Qt's "Retrying to obtain clipboard" churn on every poll.
+            text = self._clipboard_text()
+        else:
+            text = self._clipboard_text()
+            if text == self._last_clip:
+                return
+        self._last_clip = text
+        # Anything that isn't a plausible URL is dropped right here: it is
+        # never sent anywhere, stored, or logged. Length cap keeps a copied
+        # document from being scanned as if it were a link.
+        if len(text) > 2048 or not text.lower().startswith(("http://", "https://")):
+            return
+        if any(c.isspace() for c in text):
+            return
+        self._requestPost.emit("/api/clipboard", {"url": text})
 
     @Slot(str)
     def _on_failed(self, msg) -> None:
