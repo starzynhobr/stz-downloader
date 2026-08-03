@@ -1,0 +1,11 @@
+# Vendored third-party files must land byte-identical to upstream: a GPL
+# licence text rewritten with CRLF shows up as a permanent local change and
+# muddies redistribution compliance.
+third_party/** -text
+
+# Keep our own sources LF in the repository regardless of the platform.
+*.py text eol=lf
+*.qml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
