@@ -48,7 +48,13 @@
     "ext_add_placeholder": "add extension…",
     "ext_duplicate": "%1 is already in the list.",
     "ext_confirm_remove": "Backspace again to remove %1 — Esc cancels.",
-    "support": "Support the project"
+    "support": "Support the project",
+    "start_with_windows": "Start with Windows",
+    "start_with_windows_sub": "Launches minimised to the tray when you sign in.",
+    "minimize_to_tray": "Close to tray",
+    "minimize_to_tray_sub": "Closing the window keeps downloads running. Quit from the tray menu.",
+    "tray_open": "Open",
+    "tray_quit": "Quit"
   },
   "pt": {
     "url_placeholder": "Cole uma URL e pressione Enter…",
@@ -99,7 +105,13 @@
     "ext_add_placeholder": "adicionar extensão…",
     "ext_duplicate": "%1 já está na lista.",
     "ext_confirm_remove": "Backspace de novo remove %1 — Esc cancela.",
-    "support": "Apoie o projeto"
+    "support": "Apoie o projeto",
+    "start_with_windows": "Iniciar com o Windows",
+    "start_with_windows_sub": "Abre minimizado na bandeja ao entrar na sua conta.",
+    "minimize_to_tray": "Fechar para a bandeja",
+    "minimize_to_tray_sub": "Fechar a janela mantém os downloads. Saia pelo menu da bandeja.",
+    "tray_open": "Abrir",
+    "tray_quit": "Fechar"
   },
   "es": {
     "url_placeholder": "Pega una URL y presiona Enter…",
@@ -150,7 +162,13 @@
     "ext_add_placeholder": "añadir extensión…",
     "ext_duplicate": "%1 ya está en la lista.",
     "ext_confirm_remove": "Retroceso otra vez elimina %1 — Esc cancela.",
-    "support": "Apoya el proyecto"
+    "support": "Apoya el proyecto",
+    "start_with_windows": "Iniciar con Windows",
+    "start_with_windows_sub": "Se abre minimizado en la bandeja al iniciar sesión.",
+    "minimize_to_tray": "Cerrar a la bandeja",
+    "minimize_to_tray_sub": "Cerrar la ventana mantiene las descargas. Sal desde el menú de la bandeja.",
+    "tray_open": "Abrir",
+    "tray_quit": "Salir"
   },
   "de": {
     "url_placeholder": "URL einfügen und Enter drücken…",
@@ -201,7 +219,13 @@
     "ext_add_placeholder": "Endung hinzufügen…",
     "ext_duplicate": "%1 ist bereits in der Liste.",
     "ext_confirm_remove": "Nochmal Rücktaste entfernt %1 — Esc bricht ab.",
-    "support": "Projekt unterstützen"
+    "support": "Projekt unterstützen",
+    "start_with_windows": "Mit Windows starten",
+    "start_with_windows_sub": "Startet beim Anmelden minimiert im Infobereich.",
+    "minimize_to_tray": "In den Infobereich schließen",
+    "minimize_to_tray_sub": "Schließen behält Downloads bei. Beenden über das Infobereichsmenü.",
+    "tray_open": "Öffnen",
+    "tray_quit": "Beenden"
   },
   "fr": {
     "url_placeholder": "Collez une URL et appuyez sur Entrée…",
@@ -252,6 +276,12 @@
     "ext_add_placeholder": "ajouter une extension…",
     "ext_duplicate": "%1 est déjà dans la liste.",
     "ext_confirm_remove": "Retour arrière à nouveau retire %1 — Échap annule.",
-    "support": "Soutenir le projet"
+    "support": "Soutenir le projet",
+    "start_with_windows": "Démarrer avec Windows",
+    "start_with_windows_sub": "S'ouvre réduit dans la zone de notification à la connexion.",
+    "minimize_to_tray": "Fermer dans la zone de notification",
+    "minimize_to_tray_sub": "Fermer la fenêtre garde les téléchargements. Quittez via le menu.",
+    "tray_open": "Ouvrir",
+    "tray_quit": "Quitter"
   }
 }

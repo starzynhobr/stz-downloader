@@ -17,6 +17,7 @@ from PySide6.QtCore import Property, QObject, QThread, QTimer, QUrl, Signal, Slo
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWebSockets import QWebSocket
 
+from .. import autostart
 from ..config import Config
 
 
@@ -26,6 +27,7 @@ class _Worker(QObject):
     # items, pending, global, disk, pending_grew
     downloads = Signal(object, object, object, object, bool)
     settingsLoaded = Signal(object)
+    focusRequested = Signal()
     failed = Signal(str)
 
     def __init__(self, base: str) -> None:
@@ -39,6 +41,7 @@ class _Worker(QObject):
         self._ws_connected = False
         self._ws_connecting = False
         self._known_settings: dict | None = None
+        self._known_focus: int | None = None
 
     @Slot()
     def begin(self) -> None:
@@ -76,6 +79,13 @@ class _Worker(QObject):
         settings = data.get("settings")
         if settings and settings != self._known_settings:
             self._publish_settings(settings)
+
+        # A second launch bumps this instead of opening its own window.
+        focus = data.get("focus")
+        if focus is not None:
+            if self._known_focus is not None and focus > self._known_focus:
+                self.focusRequested.emit()
+            self._known_focus = focus
 
         pending = data.get("pending", [])
         grew = len(pending) > self._prev_pending
@@ -167,6 +177,7 @@ class Backend(QObject):
     newPendingArrived = Signal()
     settingsChanged = Signal()
     statusChanged = Signal(str)
+    focusRequested = Signal()
 
     # internal signals that drive the worker (connected to its slots)
     _requestPost = Signal(str, object)
@@ -198,6 +209,7 @@ class Backend(QObject):
         self._thread.started.connect(self._worker.begin)
         self._worker.downloads.connect(self._on_downloads)
         self._worker.settingsLoaded.connect(self._on_settings)
+        self._worker.focusRequested.connect(self.focusRequested)
         self._worker.failed.connect(self._on_failed)
         self._requestPost.connect(self._worker.post)
         self._requestPut.connect(self._worker.put_settings)
@@ -274,6 +286,13 @@ class Backend(QObject):
         self.settingsChanged.emit()
         # The clipboard is only ever read while the user has opted in, so the
         # timer itself is what the toggle controls -- not a filter downstream.
+        # Keep the login entry in step with the setting. Done here rather than
+        # at save time so an entry removed behind the app's back (or a stale
+        # one from an old install path) is corrected on the next sync.
+        wanted = bool(settings.get("start_with_windows"))
+        if autostart.supported() and autostart.is_enabled() != wanted:
+            autostart.apply(wanted)
+
         if settings.get("clipboard_enabled"):
             if not self._clip_timer.isActive():
                 # Adopt whatever is already on the clipboard as the baseline so

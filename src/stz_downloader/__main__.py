@@ -69,6 +69,27 @@ def _run_server(cfg) -> uvicorn.Server:
     return server
 
 
+def _handoff_to_running_instance(cfg) -> bool:
+    """If an instance is already up, ask it to show itself and report True.
+
+    The bridge port doubles as the single-instance lock: only one process can
+    hold it. Launching again should surface the running window rather than
+    stack another tray icon, which is what made a previous app of this shape
+    accumulate duplicates.
+    """
+    import httpx
+
+    base = f"http://{cfg.server.host}:{cfg.server.port}"
+    try:
+        if not httpx.get(f"{base}/api/health", timeout=1.5).json().get("ok"):
+            return False
+        httpx.post(f"{base}/api/focus", timeout=1.5)
+        logging.info("Another instance is running; asked it to come to front")
+        return True
+    except Exception:  # noqa: BLE001 -- nothing listening, or not our server
+        return False
+
+
 def main() -> int:
     _ensure_stdio()
     _setup_logging()
@@ -83,6 +104,10 @@ def main() -> int:
     args, _unknown = parser.parse_known_args()
 
     cfg = load_config()
+
+    if not args.headless and _handoff_to_running_instance(cfg):
+        return 0
+
     server = _run_server(cfg)
 
     if args.headless:

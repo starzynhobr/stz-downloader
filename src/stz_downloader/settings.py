@@ -46,6 +46,11 @@ class Settings(BaseModel):
     disk_guard_enabled: bool = True
     disk_reserve_mb: int = 2048          # keep this much free for the OS
 
+    start_with_windows: bool = False     # HKCU Run entry, see autostart.py
+    # Closing the window hides it to the tray instead of quitting, so the
+    # bridge keeps serving the browser extension and downloads keep running.
+    minimize_to_tray: bool = True
+
 
 class SettingsStore:
     def __init__(self, path: Path | None = None):

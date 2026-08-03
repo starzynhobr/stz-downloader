@@ -11,6 +11,7 @@ Both the browser extension and the QML UI talk to this server:
   GET  /api/pending             <- pending confirmations
   POST /api/pending/{id}/...      confirm | cancel
   POST /api/clipboard           <- UI offers a copied URL (filtered here)
+  POST /api/focus               <- a second launch asks the UI to show itself
   WS   /ws                      <- UI subscribes to live updates
 
 Bound to 127.0.0.1 only. CORS is opened for browser-extension origins.
@@ -80,6 +81,8 @@ class SettingsPatch(BaseModel):
     clipboard_enabled: bool | None = None
     disk_guard_enabled: bool | None = None
     disk_reserve_mb: int | None = None
+    start_with_windows: bool | None = None
+    minimize_to_tray: bool | None = None
 
 
 class ClipboardRequest(BaseModel):
@@ -188,6 +191,10 @@ def create_app(cfg: Config) -> FastAPI:
     # Disk guard bookkeeping: which downloads *we* paused, so a resume only
     # touches those and never revives something the user paused by hand.
     guard_state: dict = {"tripped": False, "paused_gids": []}
+    # Bumped by /api/focus. A second launch asks the running instance to come
+    # to the front instead of opening another window; the UI watches this
+    # counter in the broadcast rather than needing a channel of its own.
+    focus_state: dict = {"count": 0}
 
     async def _start(req: DownloadRequest) -> str:
         n = req.connections or store.settings.connections
@@ -316,6 +323,7 @@ def create_app(cfg: Config) -> FastAPI:
                     # settings even if its one-shot load at startup lost the
                     # race against the bridge coming up.
                     "settings": store.settings.model_dump(),
+                    "focus": focus_state["count"],
                 }
             except Exception:  # aria2 may be momentarily unavailable
                 continue
@@ -330,6 +338,12 @@ def create_app(cfg: Config) -> FastAPI:
     @app.get("/api/health")
     async def health() -> dict:
         return {"ok": True, "aria2": manager.is_running()}
+
+    @app.post("/api/focus")
+    async def focus() -> dict:
+        """Ask the running UI to show itself (second-launch handoff)."""
+        focus_state["count"] += 1
+        return {"ok": True, "focus": focus_state["count"]}
 
     # -- settings -------------------------------------------------------
     @app.get("/api/settings")
@@ -431,6 +445,7 @@ def create_app(cfg: Config) -> FastAPI:
             "global": await _global_stat(),
             "disk": _disk_report(items),
             "settings": store.settings.model_dump(),
+            "focus": focus_state["count"],
         }
 
     @app.post("/api/downloads/{gid}/pause")

@@ -84,6 +84,17 @@ ApplicationWindow {
         function onPendingChanged() { confirmDialog.syncSelection() }
     }
 
+    // Closing hides to the tray instead of quitting, so the bridge keeps
+    // serving the extension and downloads keep running. Quit is on the tray
+    // menu. Without a tray icon this must not swallow the close, or the app
+    // would be unclosable.
+    onClosing: (close) => {
+        if (backend.settings.minimize_to_tray) {
+            close.accepted = false
+            win.hide()
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 16
@@ -616,6 +627,18 @@ ApplicationWindow {
                 onToggled: (v) => settingsDrawer.setS("intercept_all", v)
             }
             SettingToggle {
+                label: i18n.strings.start_with_windows
+                sub: i18n.strings.start_with_windows_sub
+                checked: settingsDrawer.getS("start_with_windows", false)
+                onToggled: (v) => settingsDrawer.setS("start_with_windows", v)
+            }
+            SettingToggle {
+                label: i18n.strings.minimize_to_tray
+                sub: i18n.strings.minimize_to_tray_sub
+                checked: settingsDrawer.getS("minimize_to_tray", true)
+                onToggled: (v) => settingsDrawer.setS("minimize_to_tray", v)
+            }
+            SettingToggle {
                 label: i18n.strings.clipboard_enabled
                 sub: i18n.strings.clipboard_sub
                 checked: settingsDrawer.getS("clipboard_enabled", false)
@@ -841,6 +864,8 @@ ApplicationWindow {
                             auto_start: settingsDrawer.getS("auto_start", false),
                             intercept_all: settingsDrawer.getS("intercept_all", false),
                             clipboard_enabled: settingsDrawer.getS("clipboard_enabled", false),
+                            start_with_windows: settingsDrawer.getS("start_with_windows", false),
+                            minimize_to_tray: settingsDrawer.getS("minimize_to_tray", true),
                             disk_guard_enabled: settingsDrawer.getS("disk_guard_enabled", true),
                             disk_reserve_mb: settingsDrawer.getS("disk_reserve_mb", 2048),
                             extensions: settingsDrawer.extList.slice()

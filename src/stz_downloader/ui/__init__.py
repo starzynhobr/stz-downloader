@@ -7,12 +7,14 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QUrl, qInstallMessageHandler
-from PySide6.QtGui import QGuiApplication, QIcon
+from PySide6.QtGui import QIcon
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtWidgets import QApplication
 
 from ..config import Config
 from .backend import Backend
 from .translator import Translator
+from .tray import Tray
 
 QML_DIR = Path(__file__).resolve().parent / "qml"
 _DLL_DIR_HANDLES = []
@@ -69,7 +71,9 @@ def run_ui(cfg: Config) -> int:
     qInstallMessageHandler(_qt_message_handler)
     logging.info("Starting UI with QML dir %s", QML_DIR)
 
-    app = QGuiApplication(sys.argv)
+    # QApplication rather than QGuiApplication: QSystemTrayIcon and its menu
+    # live in QtWidgets.
+    app = QApplication(sys.argv)
     app.setApplicationName("STZ Downloader")
     app.setApplicationDisplayName("STZ Downloader")
     icon_path = _app_icon_path()
@@ -102,6 +106,41 @@ def run_ui(cfg: Config) -> int:
             if hasattr(root, "setIcon"):
                 root.setIcon(QIcon(str(icon_path)))
 
-    app.aboutToQuit.connect(backend.stop)  # stop the worker thread cleanly
+    window = engine.rootObjects()[0]
+
+    def show_window() -> None:
+        window.show()
+        window.raise_()
+        window.requestActivate()
+
+    tray = None
+    if icon_path:
+        tray = Tray(
+            QIcon(str(icon_path)),
+            on_open=show_window,
+            on_quit=app.quit,
+            labels={"open": translator.tray_open, "quit": translator.tray_quit},
+        )
+        tray.show()
+        translator.languageChanged.connect(
+            lambda: tray.retranslate(
+                {"open": translator.tray_open, "quit": translator.tray_quit}
+            )
+        )
+    else:
+        logging.warning("No app icon: running without a tray icon")
+
+    # With a tray icon the window closing must not end the process -- the
+    # bridge keeps serving the extension and downloads keep running. QML
+    # decides whether a close hides or quits; this stops Qt quitting first.
+    app.setQuitOnLastWindowClosed(tray is None)
+    backend.focusRequested.connect(show_window)
+
+    def on_quit() -> None:
+        if tray:
+            tray.hide()
+        backend.stop()
+
+    app.aboutToQuit.connect(on_quit)  # stop the worker thread cleanly
     backend.start()
     return app.exec()

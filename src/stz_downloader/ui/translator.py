@@ -67,3 +67,12 @@ class Translator(QObject):
     @Slot(str)
     def setLanguage(self, code: str) -> None:  # noqa: N802
         self.language = code
+
+    # -- convenience for non-QML consumers (the tray menu) ----------------
+    @property
+    def tray_open(self) -> str:
+        return self.strings.get("tray_open", "Open")
+
+    @property
+    def tray_quit(self) -> str:
+        return self.strings.get("tray_quit", "Quit")
