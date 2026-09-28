@@ -149,3 +149,10 @@ https://github.com/starzynhobr/stz-downloader/blob/main/PRIVACY.md
    When asked if source code is needed, select **No** because the extension uses unminified, readable vanilla JavaScript.
 5. **Gecko ID**:
    AMO recognizes the ID `stz-downloader@stzlabs.com` declared in `manifest.firefox.json` and keeps it consistent with the desktop app's registry configuration.
+
+---
+
+## 6. Next Release Checklist
+
+- **Firefox `strict_min_version`:** bump `browser_specific_settings.gecko.strict_min_version` in `extension/manifest.firefox.json` from `115.0` to `140.0`. AMO warns that `data_collection_permissions` is only supported from Firefox 140 (Android 142); 115 was kept for the 0.1.10 submission.
+- Store IDs: Chrome `jhahaknbmgkbnhfnknclelilaoobmpcm`, Firefox `stz-downloader@stzlabs.com`. Updates are uploaded as new versions of the existing items; the listing stays as is.
