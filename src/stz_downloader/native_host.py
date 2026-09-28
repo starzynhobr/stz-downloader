@@ -21,7 +21,7 @@ import httpx
 from .runtime import RuntimeInfo, load_runtime, runtime_dir
 
 NATIVE_HOST_NAME = "com.stzlabs.downloader"
-CHROME_EXTENSION_ID = "phgjjaoehcafkgedkhhkdgoknpoalfgi"
+CHROME_EXTENSION_ID = "jhahaknbmgkbnhfnknclelilaoobmpcm"
 FIREFOX_EXTENSION_ID = "stz-downloader@stzlabs.com"
 MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 
