@@ -5,18 +5,26 @@ interface em **QML (PySide6)** e o motor de download **aria2**. Inclui uma
 extensão de navegador (Manifest V3) que intercepta downloads e os repassa ao
 aria2 — a sensação "IDM".
 
+O aplicativo permite limitar a velocidade total nas configurações e também
+definir um teto individual em cada download. O valor `0` remove o limite; o
+limite global é persistido e reaplicado ao iniciar, enquanto limites individuais
+acompanham as opções da sessão do aria2.
+
 ## Arquitetura
 
 ```
-Extensão (Chrome/Firefox)  ──HTTP──►  Bridge FastAPI (127.0.0.1:8765)
-                                          │  JSON-RPC
-UI QML (PySide6)  ──HTTP/WS──►  Bridge ───►  aria2c (subprocesso, :6800)
+Extensão (Chrome/Firefox) ──Native Messaging──► Host nativo
+                                                    │ HTTP autenticado
+UI QML (PySide6) ──HTTP/WS autenticado──► Bridge FastAPI (porta dinâmica)
+                                                    │ JSON-RPC
+                                                    ▼
+                                          aria2c (subprocesso, :6800)
 ```
 
 - `src/stz_downloader/aria2/`  — gerência do processo `aria2c` + cliente JSON-RPC
 - `src/stz_downloader/server/` — ponte FastAPI (REST + WebSocket) usada pela UI e pela extensão
 - `src/stz_downloader/ui/`     — UI em QML e o backend que a alimenta
-- `extension/`                 — extensão MV3
+- `extension/`                 — extensão MV3, sem dependência de porta fixa
 - `third_party/aria2/`         — binário do aria2 (GPL, baixado à parte) + licença
 - `packaging/msix/`            — empacotamento MSIX self-signed
 
@@ -32,8 +40,19 @@ python -m stz_downloader --headless  # só a bridge (para testar a extensão)
 
 ### Extensão
 
-A bridge precisa estar rodando (`python -m stz_downloader` ou
-`--headless`). O botão da extensão mostra se está conectada.
+A extensão conversa com `com.stzlabs.downloader`, o Native Messaging host
+instalado junto com o aplicativo. Se um download chegar com o aplicativo
+fechado, o host o inicia e aguarda a bridge. A bridge prefere a porta 8765 por
+compatibilidade, mas reserva automaticamente qualquer porta livre se ela já
+estiver ocupada.
+
+O build Windows gera `stz-downloader-native-host.exe` ao lado do aplicativo. O
+instalador Inno registra e remove o host automaticamente; builds MSIX fazem o
+registro no primeiro início. Para testar uma build congelada sem instalador:
+
+```powershell
+.\dist\stz-downloader\stz-downloader-native-host.exe --register
+```
 
 Gere os ícones uma vez: `python scripts/generate_icons.py`.
 
@@ -61,8 +80,9 @@ Gere os ícones uma vez: `python scripts/generate_icons.py`.
 
 ## Configuração
 
-Padrões em `pyproject.toml` sob `[tool.stz-downloader.*]`. Sobrescreva em
-`%APPDATA%/stz-downloader/config.toml`:
+Os padrões essenciais do aria2 ficam no código para também existirem no app
+congelado; preferências de empacotamento ficam em `pyproject.toml`. Sobrescreva
+em `%APPDATA%/stz-downloader/config.toml`:
 
 ```toml
 [aria2]
@@ -71,6 +91,11 @@ rpc_port = 6900
 [downloads]
 directory = "D:/Downloads"
 ```
+
+`server.port` é somente uma preferência. A porta real é publicada, junto com
+um token aleatório de sessão, em
+`%LOCALAPPDATA%\stz-downloader\runtime.json`; clientes sem o token são
+rejeitados.
 
 ## Empacotamento (MSIX self-signed)
 

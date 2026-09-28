@@ -50,9 +50,13 @@ def build(target: str, manifest_name: str, version: str) -> Path:
     if out.exists():
         out.unlink()
 
+    manifest_data = json.loads((EXT / manifest_name).read_text("utf-8"))
+    # Chrome Web Store rejects the 'key' field when uploading a new item.
+    if target == "chrome":
+        manifest_data.pop("key", None)
+
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
-        # the chosen manifest, written as manifest.json
-        zf.writestr("manifest.json", (EXT / manifest_name).read_text("utf-8"))
+        zf.writestr("manifest.json", json.dumps(manifest_data, indent=2))
         for name in SHARED:
             for file in _iter_files(EXT / name):
                 zf.write(file, file.relative_to(EXT).as_posix())

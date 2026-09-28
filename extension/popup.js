@@ -1,5 +1,6 @@
 const api = globalThis.browser ?? globalThis.chrome;
-const DEFAULTS = { bridge: "http://127.0.0.1:8765", enabled: true };
+const NATIVE_HOST = "com.stzlabs.downloader";
+const DEFAULTS = { enabled: true };
 
 const $ = (id) => document.getElementById(id);
 
@@ -17,15 +18,15 @@ function localize() {
 async function load() {
   const s = { ...DEFAULTS, ...(await api.storage.local.get(DEFAULTS)) };
   $("enabled").checked = s.enabled;
-  $("bridge").value = s.bridge;
-  ping(s.bridge);
+  ping();
 }
 
-async function ping(bridge) {
+async function ping() {
   const el = $("status");
   try {
-    const r = await fetch(`${bridge}/api/health`);
-    const j = await r.json();
+    const response = await api.runtime.sendNativeMessage(NATIVE_HOST, { type: "status" });
+    if (!response?.ok) throw new Error(response?.error || "offline");
+    const j = response.result;
     el.textContent = j.aria2 ? msg("statusConnected") : msg("statusNoAria2");
     el.className = "status " + (j.aria2 ? "ok" : "bad");
   } catch {
@@ -37,10 +38,6 @@ async function ping(bridge) {
 $("enabled").addEventListener("change", (e) =>
   api.storage.local.set({ enabled: e.target.checked })
 );
-$("bridge").addEventListener("change", (e) => {
-  api.storage.local.set({ bridge: e.target.value });
-  ping(e.target.value);
-});
 
 localize();
 load();

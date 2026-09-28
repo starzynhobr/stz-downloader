@@ -22,14 +22,15 @@ import asyncio
 import contextlib
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from ..aria2 import Aria2Client, Aria2Manager
@@ -80,6 +81,7 @@ class SettingsPatch(BaseModel):
     start_with_windows: bool | None = None
     extensions: list[str] | None = None
     connections: int | None = None
+    download_limit_bps: int | None = None
     clipboard_enabled: bool | None = None
     disk_guard_enabled: bool | None = None
     disk_reserve_mb: int | None = None
@@ -89,6 +91,11 @@ class SettingsPatch(BaseModel):
 
 class ClipboardRequest(BaseModel):
     url: str
+
+
+class SpeedLimitRequest(BaseModel):
+    # Zero removes the limit, matching aria2's option semantics.
+    bytes_per_second: int
 
 
 def _committed_bytes(items: list[dict]) -> int:
@@ -176,20 +183,15 @@ def _reveal_path(path: Path) -> None:
         subprocess.Popen(["xdg-open", str(path.parent)])
 
 
-def create_app(cfg: Config) -> FastAPI:
-    app = FastAPI(title="stz-downloader bridge")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],  # local-only server; extension origins vary
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
+def create_app(cfg: Config, auth_token: str | None = None) -> FastAPI:
     manager = Aria2Manager(cfg.aria2, cfg.downloads.resolve_directory())
     client = Aria2Client(cfg.aria2.rpc_url, cfg.aria2.rpc_secret)
     store = SettingsStore()
     clients: set[WebSocket] = set()
     pending: dict[str, dict] = {}  # id -> pending download awaiting confirmation
+    # Hydrated once from aria2 for restored downloads and updated whenever the
+    # user changes a limit. This avoids one getOption RPC per item every tick.
+    download_limits: dict[str, int] = {}
     # Disk guard bookkeeping: which downloads *we* paused, so a resume only
     # touches those and never revives something the user paused by hand.
     guard_state: dict = {"tripped": False, "paused_gids": []}
@@ -197,6 +199,34 @@ def create_app(cfg: Config) -> FastAPI:
     # to the front instead of opening another window; the UI watches this
     # counter in the broadcast rather than needing a channel of its own.
     focus_state: dict = {"count": 0}
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app: FastAPI):
+        manager.start()
+        app.state.limit_applier = asyncio.create_task(_restore_global_limit())
+        app.state.broadcaster = asyncio.create_task(_broadcast_loop())
+        try:
+            yield
+        finally:
+            app.state.limit_applier.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await app.state.limit_applier
+            app.state.broadcaster.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await app.state.broadcaster
+            await client.aclose()
+            manager.stop()
+
+    app = FastAPI(title="stz-downloader bridge", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def authenticate_local_client(request: Request, call_next):
+        if auth_token and request.url.path.startswith("/api/"):
+            supplied = request.headers.get("Authorization", "")
+            expected = f"Bearer {auth_token}"
+            if not secrets.compare_digest(supplied, expected):
+                return JSONResponse({"detail": "unauthorized local client"}, status_code=401)
+        return await call_next(request)
 
     async def _start(req: DownloadRequest) -> str:
         n = req.connections or store.settings.connections
@@ -210,24 +240,35 @@ def create_app(cfg: Config) -> FastAPI:
             connections=n,
         )
 
-    @app.on_event("startup")
-    async def _startup() -> None:
-        manager.start()
-        app.state.broadcaster = asyncio.create_task(_broadcast_loop())
+    async def _restore_global_limit() -> None:
+        """Apply the persisted limit once aria2's RPC socket is ready."""
+        for _ in range(50):
+            try:
+                await client.change_global_option({
+                    "max-overall-download-limit": str(store.settings.download_limit_bps)
+                })
+                return
+            except Exception:
+                await asyncio.sleep(0.1)
 
-    @app.on_event("shutdown")
-    async def _shutdown() -> None:
-        app.state.broadcaster.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await app.state.broadcaster
-        await client.aclose()
-        manager.stop()
+    async def _item_limit(gid: str) -> int:
+        if gid not in download_limits:
+            try:
+                options = await client.get_option(gid)
+                download_limits[gid] = int(options.get("max-download-limit", 0) or 0)
+            except Exception:
+                # aria2 may still be starting; leave it uncached so the next
+                # snapshot retries instead of displaying unlimited forever.
+                return 0
+        return download_limits[gid]
 
     async def _snapshot() -> list[dict]:
         active = await client.tell_active(PROGRESS_KEYS)
         waiting = await client.tell_waiting(0, 100)
         stopped = await client.tell_stopped(0, 100)
-        return [_normalize(i) for i in (*active, *waiting, *stopped)]
+        items = [_normalize(i) for i in (*active, *waiting, *stopped)]
+        limits = await asyncio.gather(*(_item_limit(i["gid"]) for i in items))
+        return [{**item, "speedLimit": limit} for item, limit in zip(items, limits)]
 
     async def _global_stat() -> dict:
         stat = await client.get_global_stat()
@@ -339,7 +380,12 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.get("/api/health")
     async def health() -> dict:
-        return {"ok": True, "aria2": manager.is_running()}
+        return {
+            "ok": True,
+            "app": "stz-downloader",
+            "protocol": 1,
+            "aria2": manager.is_running(),
+        }
 
     @app.post("/api/focus")
     async def focus() -> dict:
@@ -354,7 +400,24 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.put("/api/settings")
     async def put_settings(patch: SettingsPatch) -> dict:
-        return store.update(patch.model_dump(exclude_none=True)).model_dump()
+        changes = patch.model_dump(exclude_none=True)
+        if "download_limit_bps" in changes:
+            limit = changes["download_limit_bps"]
+            if limit < 0:
+                raise HTTPException(422, "speed limit cannot be negative")
+            # Persist first. If aria2 is still opening its RPC socket, the
+            # retry task reads this new value and applies it as soon as the
+            # engine is ready instead of losing the user's setting.
+            updated = store.update(changes)
+            try:
+                await client.change_global_option({
+                    "max-overall-download-limit": str(limit)
+                })
+            except Exception:
+                if app.state.limit_applier.done():
+                    app.state.limit_applier = asyncio.create_task(_restore_global_limit())
+            return updated.model_dump()
+        return store.update(changes).model_dump()
 
     # -- downloads ------------------------------------------------------
     @app.post("/api/download")
@@ -460,7 +523,22 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.post("/api/downloads/{gid}/cancel")
     async def cancel(gid: str) -> dict:
-        return {"gid": await client.remove_any(gid)}
+        result = await client.remove_any(gid)
+        download_limits.pop(gid, None)
+        return {"gid": result}
+
+    @app.post("/api/downloads/{gid}/speed-limit")
+    async def set_speed_limit(gid: str, body: SpeedLimitRequest) -> dict:
+        if body.bytes_per_second < 0:
+            raise HTTPException(422, "speed limit cannot be negative")
+        await client.change_option(
+            gid, {"max-download-limit": str(body.bytes_per_second)}
+        )
+        download_limits[gid] = body.bytes_per_second
+        return {
+            "gid": gid,
+            "bytes_per_second": body.bytes_per_second,
+        }
 
     @app.post("/api/downloads/{gid}/open")
     async def open_download(gid: str) -> dict:
@@ -474,10 +552,17 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.post("/api/downloads/purge")
     async def purge() -> dict:
-        return {"result": await client.purge_download_results()}
+        result = await client.purge_download_results()
+        download_limits.clear()
+        return {"result": result}
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
+        if auth_token:
+            supplied = ws.headers.get("Authorization", "")
+            if not secrets.compare_digest(supplied, f"Bearer {auth_token}"):
+                await ws.close(code=1008, reason="unauthorized local client")
+                return
         await ws.accept()
         clients.add(ws)
         try:

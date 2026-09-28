@@ -9,6 +9,7 @@ $root = Resolve-Path "$PSScriptRoot\.."
 $dist = (New-Item -ItemType Directory -Force $OutDir).FullName
 $work = Join-Path $dist "pyinstaller-work"
 $spec = Join-Path $dist "pyinstaller-spec"
+$nativeDist = Join-Path $dist "native-host-dist"
 $src = Join-Path $root "src"
 $qml = Join-Path $root "src\stz_downloader\ui\qml"
 $i18n = Join-Path $root "src\stz_downloader\ui\i18n"
@@ -17,6 +18,7 @@ $aria2Exe = Join-Path $root "third_party\aria2\aria2c.exe"
 $aria2License = Join-Path $root "third_party\aria2\LICENSE"
 $aria2Source = Join-Path $root "third_party\aria2\SOURCE.md"
 $entry = Join-Path $root "scripts\pyinstaller_entry.py"
+$nativeEntry = Join-Path $root "scripts\native_host_entry.py"
 $icon = Join-Path $root "assets\stz-downloader.ico"
 
 if (-not (Get-Command pyinstaller.exe -ErrorAction SilentlyContinue)) {
@@ -53,6 +55,28 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller failed with exit code $LASTEXITCODE"
     }
+
+    # Console mode is required: Native Messaging uses stdin/stdout as its
+    # framed JSON transport. Build onedir and copy only the launcher beside
+    # the app; both launchers then share the app's _internal dependency tree.
+    # Avoiding onefile extraction keeps every browser hand-off fast.
+    pyinstaller `
+        --noconfirm `
+        --clean `
+        --onedir `
+        --console `
+        --name stz-downloader-native-host `
+        --paths $src `
+        --distpath $nativeDist `
+        --workpath $work `
+        --specpath $spec `
+        $nativeEntry
+    if ($LASTEXITCODE -ne 0) {
+        throw "Native Messaging host build failed with exit code $LASTEXITCODE"
+    }
+    Copy-Item -Force `
+        (Join-Path $nativeDist "stz-downloader-native-host\stz-downloader-native-host.exe") `
+        (Join-Path $dist "stz-downloader\stz-downloader-native-host.exe")
 }
 finally {
     Pop-Location

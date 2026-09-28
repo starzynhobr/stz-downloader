@@ -2,7 +2,8 @@
 //
 // Strategy (the "IDM" behaviour): when the browser starts a download, we
 // cancel + erase it from the browser and hand the URL (with cookies, referer
-// and user-agent) to the local stz-downloader bridge, which feeds aria2.
+// and user-agent) through the registered Native Messaging host, which finds
+// the dynamically allocated local bridge and feeds aria2.
 //
 // The bridge owns the interception settings (the file-type filter, master
 // toggle). We fetch them and decide *before* cancelling the browser download,
@@ -11,9 +12,9 @@
 // Cross-browser API alias. Firefox exposes promise-based `browser.*`;
 // Chrome exposes `chrome.*` (promise-based in MV3 when no callback is given).
 const api = globalThis.browser ?? globalThis.chrome;
+const NATIVE_HOST = "com.stzlabs.downloader";
 
 const DEFAULTS = {
-  bridge: "http://127.0.0.1:8765",
   enabled: true, // local quick on/off (popup)
 };
 
@@ -26,17 +27,20 @@ async function getLocal() {
   return { ...DEFAULTS, ...s };
 }
 
+async function nativeRequest(type, payload) {
+  const response = await api.runtime.sendNativeMessage(NATIVE_HOST, { type, payload });
+  if (!response?.ok) throw new Error(response?.error || "native host unavailable");
+  return response.result;
+}
+
 // Cache the bridge settings briefly so we don't fetch on every event.
 let _cfg = null;
 let _cfgAt = 0;
-async function bridgeSettings(bridge) {
+async function bridgeSettings() {
   if (_cfg && Date.now() - _cfgAt < 8000) return _cfg;
   try {
-    const r = await fetch(`${bridge}/api/settings`);
-    if (r.ok) {
-      _cfg = await r.json();
-      _cfgAt = Date.now();
-    }
+    _cfg = await nativeRequest("settings");
+    _cfgAt = Date.now();
   } catch (e) {
     /* keep stale cache or null */
   }
@@ -70,7 +74,7 @@ async function buildCookieHeader(url) {
   }
 }
 
-async function sendToBridge(item, bridge, fromBrowser) {
+async function sendToBridge(item, fromBrowser) {
   const url = item.finalUrl || item.url;
   const cookies = await buildCookieHeader(url);
   const payload = {
@@ -83,12 +87,7 @@ async function sendToBridge(item, bridge, fromBrowser) {
     filesize: item.fileSize > 0 ? item.fileSize : item.totalBytes > 0 ? item.totalBytes : 0,
     from_browser: !!fromBrowser,
   };
-  const resp = await fetch(`${bridge}/api/download`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!resp.ok) throw new Error(`bridge responded ${resp.status}`);
+  await nativeRequest("download", payload);
 }
 
 async function flashBadge() {
@@ -98,15 +97,15 @@ async function flashBadge() {
 }
 
 api.downloads.onCreated.addListener(async (item) => {
-  const { enabled, bridge } = await getLocal();
+  const { enabled } = await getLocal();
   if (!enabled) return;
   if (item.state === "complete") return; // already done (e.g. from cache)
 
-  const cfg = await bridgeSettings(bridge);
+  const cfg = await bridgeSettings();
   if (!shouldIntercept(cfg, item.filename, item.finalUrl || item.url)) return;
 
   try {
-    await sendToBridge(item, bridge, true);
+    await sendToBridge(item, true);
     // Hand-off succeeded: stop the browser's own download.
     await api.downloads.cancel(item.id);
     await api.downloads.erase({ id: item.id });
@@ -129,9 +128,8 @@ api.runtime.onInstalled.addListener(() => {
 api.contextMenus.onClicked.addListener(async (info) => {
   const url = info.linkUrl || info.srcUrl;
   if (!url) return;
-  const { bridge } = await getLocal();
   try {
-    await sendToBridge({ url, referrer: info.pageUrl }, bridge, true);
+    await sendToBridge({ url, referrer: info.pageUrl }, true);
     flashBadge();
   } catch (e) {
     console.warn("stz-downloader send failed:", e);

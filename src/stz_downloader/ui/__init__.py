@@ -66,7 +66,12 @@ def _app_icon_path() -> Path | None:
     return None
 
 
-def run_ui(cfg: Config, start_minimized: bool = False) -> int:
+def run_ui(
+    cfg: Config,
+    start_minimized: bool = False,
+    base_url: str | None = None,
+    auth_token: str | None = None,
+) -> int:
     _configure_qt_paths()
     qInstallMessageHandler(_qt_message_handler)
     logging.info("Starting UI with QML dir %s", QML_DIR)
@@ -91,7 +96,7 @@ def run_ui(cfg: Config, start_minimized: bool = False) -> int:
             logging.error("QML warning: %s", warning.toString()) for warning in warnings
         ]
     )
-    backend = Backend(cfg)
+    backend = Backend(cfg, base_url=base_url, auth_token=auth_token)
     translator = Translator()
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("i18n", translator)

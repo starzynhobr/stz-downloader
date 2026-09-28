@@ -11,14 +11,18 @@ from __future__ import annotations
 import ctypes
 import json
 import sys
+import time
 
 import httpx
 from PySide6.QtCore import Property, QObject, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QGuiApplication
+from PySide6.QtNetwork import QNetworkRequest
 from PySide6.QtWebSockets import QWebSocket
 
 from .. import autostart
 from ..config import Config
+
+LIVE_UPDATE_TIMEOUT_SECONDS = 3.0
 
 
 class _Worker(QObject):
@@ -30,23 +34,27 @@ class _Worker(QObject):
     focusRequested = Signal()
     failed = Signal(str)
 
-    def __init__(self, base: str) -> None:
+    def __init__(self, base: str, auth_token: str | None = None) -> None:
         super().__init__()
         self._base = base
+        self._auth_token = auth_token
         self._ws_url = base.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
         self._http: httpx.Client | None = None
         self._ws: QWebSocket | None = None
         self._reconnect_timer: QTimer | None = None
+        self._watchdog_timer: QTimer | None = None
         self._prev_pending = 0
         self._ws_connected = False
         self._ws_connecting = False
+        self._last_live_update = time.monotonic()
         self._known_settings: dict | None = None
         self._known_focus: int | None = None
 
     @Slot()
     def begin(self) -> None:
         # Created here so the client, socket, and timer belong to the worker thread.
-        self._http = httpx.Client(timeout=10.0)
+        headers = {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
+        self._http = httpx.Client(timeout=10.0, headers=headers)
         self._ws = QWebSocket()
         self._ws.connected.connect(self._on_ws_connected)
         self._ws.disconnected.connect(self._on_ws_disconnected)
@@ -58,6 +66,15 @@ class _Worker(QObject):
         self._reconnect_timer.timeout.connect(self._ensure_ws)
         self._reconnect_timer.start()
 
+        # WebSocket is the efficient normal path. If it stays connected but
+        # messages stall, fall back to one HTTP snapshot per second until live
+        # updates resume. This keeps progress moving instead of jumping by
+        # gigabytes after a transient bridge/WebSocket pause.
+        self._watchdog_timer = QTimer()
+        self._watchdog_timer.setInterval(1000)
+        self._watchdog_timer.timeout.connect(self._watch_live_updates)
+        self._watchdog_timer.start()
+
         self._load_settings()
         self._poll()
         self._ensure_ws()
@@ -66,6 +83,8 @@ class _Worker(QObject):
     def stop(self) -> None:
         if self._reconnect_timer:
             self._reconnect_timer.stop()
+        if self._watchdog_timer:
+            self._watchdog_timer.stop()
         if self._ws:
             self._ws.close()
         if self._http:
@@ -101,22 +120,33 @@ class _Worker(QObject):
     @Slot()
     def _poll(self) -> None:
         try:
-            data = self._http.get(f"{self._base}/api/downloads").json()
-            self._emit_downloads(data)
+            response = self._http.get(f"{self._base}/api/downloads")
+            response.raise_for_status()
+            self._emit_downloads(response.json())
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
+
+    @Slot()
+    def _watch_live_updates(self) -> None:
+        stale = time.monotonic() - self._last_live_update >= LIVE_UPDATE_TIMEOUT_SECONDS
+        if not self._ws_connected or stale:
+            self._poll()
 
     @Slot()
     def _ensure_ws(self) -> None:
         if not self._ws or self._ws_connected or self._ws_connecting:
             return
         self._ws_connecting = True
-        self._ws.open(QUrl(self._ws_url))
+        request = QNetworkRequest(QUrl(self._ws_url))
+        if self._auth_token:
+            request.setRawHeader(b"Authorization", f"Bearer {self._auth_token}".encode())
+        self._ws.open(request)
 
     @Slot()
     def _on_ws_connected(self) -> None:
         self._ws_connected = True
         self._ws_connecting = False
+        self._last_live_update = time.monotonic()
 
     @Slot()
     def _on_ws_disconnected(self) -> None:
@@ -138,6 +168,7 @@ class _Worker(QObject):
             self.failed.emit(f"Invalid WebSocket payload: {exc}")
             return
         if data.get("type") == "downloads":
+            self._last_live_update = time.monotonic()
             self._emit_downloads(data)
 
     @Slot()
@@ -156,7 +187,8 @@ class _Worker(QObject):
     @Slot(str, object)
     def post(self, path: str, payload: object) -> None:
         try:
-            self._http.post(f"{self._base}{path}", json=payload or None)
+            response = self._http.post(f"{self._base}{path}", json=payload or None)
+            response.raise_for_status()
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
         self._poll()
@@ -164,7 +196,9 @@ class _Worker(QObject):
     @Slot(str, object)
     def put_settings(self, path: str, payload: object) -> None:
         try:
-            self._publish_settings(self._http.put(f"{self._base}{path}", json=payload).json())
+            response = self._http.put(f"{self._base}{path}", json=payload)
+            response.raise_for_status()
+            self._publish_settings(response.json())
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
 
@@ -183,9 +217,14 @@ class Backend(QObject):
     _requestPost = Signal(str, object)
     _requestPut = Signal(str, object)
 
-    def __init__(self, cfg: Config) -> None:
+    def __init__(
+        self,
+        cfg: Config,
+        base_url: str | None = None,
+        auth_token: str | None = None,
+    ) -> None:
         super().__init__()
-        base = f"http://{cfg.server.host}:{cfg.server.port}"
+        base = base_url or f"http://{cfg.server.host}:{cfg.server.port}"
         self._items: list[dict] = []
         self._pending: list[dict] = []
         self._global: dict = {}
@@ -204,7 +243,7 @@ class Backend(QObject):
         self._clip_timer.timeout.connect(self._check_clipboard)
 
         self._thread = QThread()
-        self._worker = _Worker(base)
+        self._worker = _Worker(base, auth_token)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.begin)
         self._worker.downloads.connect(self._on_downloads)
@@ -408,6 +447,13 @@ class Backend(QObject):
     @Slot(str)
     def cancel(self, gid: str) -> None:
         self._requestPost.emit(f"/api/downloads/{gid}/cancel", {})
+
+    @Slot(str, int)
+    def setSpeedLimit(self, gid: str, bytes_per_second: int) -> None:  # noqa: N802
+        self._requestPost.emit(
+            f"/api/downloads/{gid}/speed-limit",
+            {"bytes_per_second": max(0, bytes_per_second)},
+        )
 
     @Slot(str)
     def openDownload(self, gid: str) -> None:  # noqa: N802
