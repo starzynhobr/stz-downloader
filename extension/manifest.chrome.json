@@ -1,16 +1,34 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extName__",
-  "version": "0.1.0",
+  "version": "0.1.10",
   "description": "__MSG_extDescription__",
   "default_locale": "en",
-  "permissions": ["downloads", "cookies", "storage", "contextMenus"],
-  "host_permissions": ["<all_urls>", "http://127.0.0.1:8765/*"],
-  "background": { "service_worker": "background.js" },
+  "permissions": [
+    "downloads",
+    "cookies",
+    "storage",
+    "contextMenus",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_title": "STZ Downloader",
     "default_popup": "popup.html",
-    "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
-  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
 }

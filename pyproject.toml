@@ -1,6 +1,6 @@
 [project]
 name = "stz-downloader"
-version = "0.1.9"
+version = "0.1.10"
 description = "A modern, IDM-like download manager powered by aria2."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -46,39 +46,6 @@ rpc_host = "127.0.0.1"
 rpc_port = 6800
 rpc_secret = "stz-local-secret"
 # Extra aria2 args (split per token)
-extra_args = [
-    "--max-connection-per-server=16",
-    "--split=16",
-    "--min-split-size=1M",
-    "--continue=true",
-    # aria2's Windows default, prealloc, writes zeros across the whole file
-    # before fetching a byte: minutes at 0 B/s on a large download, with the
-    # RPC thread blocked so the UI freezes too.
-    #
-    # "none" only moves the cost. A segmented download writes near the end of
-    # the file within seconds -- with 8 connections on a 154 GB file that is
-    # around the 135 GB mark -- and NTFS zero-fills the whole gap right then,
-    # blocking aria2 just the same. Measured on that exact download: 136 GB of
-    # zero-fill while only 5 GB had actually been fetched.
-    #
-    # falloc sets the file's valid data length instead of writing anything:
-    # measured at under 50 ms for 4.4 GB, versus seconds of zero-writing. It
-    # also reserves the space up front, which makes the disk ledger exact.
-    "--file-allocation=falloc",
-    "--auto-file-renaming=true",
-    # Use public resolvers instead of the system DNS (fixes hosts the OS
-    # fails to resolve, e.g. behind some VPNs/firewalls).
-    "--async-dns=true",
-    "--async-dns-server=1.1.1.1,8.8.8.8",
-    # Be resilient to servers that drop connections ("Got EOF from server").
-    "--max-tries=5",
-    "--retry-wait=2",
-    "--connect-timeout=15",
-    "--timeout=30",
-    # Some servers reject too many parallel connections; aria2 backs off,
-    # but keeping a sane default avoids tripping anti-abuse limits.
-    "--lowest-speed-limit=0",
-]
 
 [tool.stz-downloader.server]
 # Local bridge that both the browser extension and the QML UI talk to.

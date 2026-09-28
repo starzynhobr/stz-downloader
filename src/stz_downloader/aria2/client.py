@@ -118,3 +118,15 @@ class Aria2Client:
 
     async def get_global_stat(self) -> dict:
         return await self._call("aria2.getGlobalStat")
+
+    async def get_option(self, gid: str) -> dict:
+        """Return the mutable aria2 options for one download."""
+        return await self._call("aria2.getOption", gid)
+
+    async def change_option(self, gid: str, options: dict[str, Any]) -> str:
+        """Apply options to an active, waiting, or paused download."""
+        return await self._call("aria2.changeOption", gid, options)
+
+    async def change_global_option(self, options: dict[str, Any]) -> str:
+        """Apply mutable options shared by all downloads."""
+        return await self._call("aria2.changeGlobalOption", options)

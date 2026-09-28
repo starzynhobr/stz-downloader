@@ -20,6 +20,26 @@ from pathlib import Path
 
 APP_NAME = "stz-downloader"
 
+# Runtime-critical aria2 defaults belong in executable code, not only in
+# pyproject.toml. Frozen PyInstaller builds do not ship the repository's
+# pyproject, and silently falling back to aria2's defaults means `prealloc`
+# zero-fills very large files before the first byte can be downloaded.
+DEFAULT_ARIA2_EXTRA_ARGS = (
+    "--max-connection-per-server=16",
+    "--split=16",
+    "--min-split-size=1M",
+    "--continue=true",
+    "--file-allocation=falloc",
+    "--auto-file-renaming=true",
+    "--async-dns=true",
+    "--async-dns-server=1.1.1.1,8.8.8.8",
+    "--max-tries=5",
+    "--retry-wait=2",
+    "--connect-timeout=15",
+    "--timeout=30",
+    "--lowest-speed-limit=0",
+)
+
 
 def _project_root() -> Path:
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -45,7 +65,7 @@ class Aria2Config:
     rpc_host: str = "127.0.0.1"
     rpc_port: int = 6800
     rpc_secret: str = "stz-local-secret"
-    extra_args: list[str] = field(default_factory=list)
+    extra_args: list[str] = field(default_factory=lambda: list(DEFAULT_ARIA2_EXTRA_ARGS))
 
     @property
     def rpc_url(self) -> str:

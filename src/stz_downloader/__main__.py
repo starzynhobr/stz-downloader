@@ -9,14 +9,27 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import secrets
+import socket
 import sys
 import threading
+import time
 import traceback
+import uuid
+from pathlib import Path
 
 import uvicorn
 
 from .config import load_config
 from .config import user_config_dir
+from .runtime import (
+    InstanceLock,
+    RuntimeInfo,
+    load_runtime,
+    publish_runtime,
+    remove_runtime,
+    reserve_server_socket,
+)
 from .server import create_app
 
 
@@ -51,43 +64,78 @@ def _ensure_stdio() -> None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
 
 
-def _run_server(cfg) -> uvicorn.Server:
-    app = create_app(cfg)
+def _run_server(
+    cfg,
+    server_socket: socket.socket,
+    auth_token: str,
+) -> tuple[uvicorn.Server, threading.Thread]:
+    app = create_app(cfg, auth_token=auth_token)
     # access_log off: the UI polls /api/downloads every second, which would
     # otherwise spam the console with one GET log line per second.
     config = uvicorn.Config(
         app,
         host=cfg.server.host,
-        port=cfg.server.port,
+        port=server_socket.getsockname()[1],
         log_level="warning",
         access_log=False,
         log_config=None,
     )
     server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, daemon=True)
+    thread = threading.Thread(
+        target=server.run,
+        kwargs={"sockets": [server_socket]},
+        daemon=True,
+        name="stz-bridge",
+    )
     thread.start()
-    return server
+    deadline = time.monotonic() + 20.0
+    while thread.is_alive() and not server.started and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if not server.started:
+        server.should_exit = True
+        thread.join(timeout=2.0)
+        raise RuntimeError("the local bridge did not become ready")
+    return server, thread
 
 
-def _handoff_to_running_instance(cfg) -> bool:
+def _handoff_to_running_instance(timeout: float = 20.0) -> bool:
     """If an instance is already up, ask it to show itself and report True.
 
-    The bridge port doubles as the single-instance lock: only one process can
-    hold it. Launching again should surface the running window rather than
-    stack another tray icon, which is what made a previous app of this shape
-    accumulate duplicates.
+    The per-user runtime lock owns single-instance behavior. Launching again
+    uses the authenticated runtime record to surface the existing window.
     """
     import httpx
 
-    base = f"http://{cfg.server.host}:{cfg.server.port}"
-    try:
-        if not httpx.get(f"{base}/api/health", timeout=1.5).json().get("ok"):
-            return False
-        httpx.post(f"{base}/api/focus", timeout=1.5)
-        logging.info("Another instance is running; asked it to come to front")
-        return True
-    except Exception:  # noqa: BLE001 -- nothing listening, or not our server
-        return False
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        info = load_runtime()
+        if info:
+            headers = {"Authorization": info.authorization}
+            try:
+                health = httpx.get(
+                    f"{info.base_url}/api/health", headers=headers, timeout=1.5
+                ).json()
+                if health.get("ok") and health.get("app") == "stz-downloader":
+                    httpx.post(f"{info.base_url}/api/focus", headers=headers, timeout=1.5)
+                    logging.info("Another instance is running; asked it to come to front")
+                    return True
+            except Exception:  # noqa: BLE001 -- first instance may still be starting
+                pass
+        time.sleep(0.1)
+    return False
+
+
+def _ensure_native_host_registration() -> None:
+    if not getattr(sys, "frozen", False):
+        return
+    from .native_host import register_native_host
+
+    helper = Path(sys.executable).resolve().with_name("stz-downloader-native-host.exe")
+    if helper.exists():
+        try:
+            register_native_host(helper)
+        except Exception:  # noqa: BLE001 -- downloads in the UI still work
+            logging.exception("Could not register the browser Native Messaging host")
 
 
 def main() -> int:
@@ -105,26 +153,63 @@ def main() -> int:
     args, _unknown = parser.parse_known_args()
 
     cfg = load_config()
+    instance_lock = InstanceLock()
+    if not instance_lock.acquire():
+        return 0 if _handoff_to_running_instance() else 1
 
-    if not args.headless and _handoff_to_running_instance(cfg):
-        return 0
+    _ensure_native_host_registration()
+    server = None
+    server_thread = None
+    runtime_info = None
+    server_socket = None
+    try:
+        server_socket, actual_port = reserve_server_socket(cfg.server.host, cfg.server.port)
+        if actual_port != cfg.server.port:
+            logging.warning(
+                "Preferred bridge port %s is unavailable; using dynamic port %s",
+                cfg.server.port,
+                actual_port,
+            )
+        runtime_info = RuntimeInfo(
+            pid=os.getpid(),
+            host=cfg.server.host,
+            port=actual_port,
+            token=secrets.token_urlsafe(32),
+            instance_id=uuid.uuid4().hex,
+        )
+        server, server_thread = _run_server(cfg, server_socket, runtime_info.token)
+        server_socket = None  # Uvicorn owns it now.
+        publish_runtime(runtime_info)
 
-    server = _run_server(cfg)
+        if args.headless:
+            try:
+                threading.Event().wait()
+            except KeyboardInterrupt:
+                pass
+            return 0
 
-    if args.headless:
-        try:
-            threading.Event().wait()
-        except KeyboardInterrupt:
-            pass
-        server.should_exit = True
-        return 0
+        # GUI imports are deferred so --headless works without a display.
+        from .ui import run_ui
 
-    # GUI imports are deferred so --headless works without a display.
-    from .ui import run_ui
-
-    code = run_ui(cfg, start_minimized=args.minimized)
-    server.should_exit = True
-    return code
+        return run_ui(
+            cfg,
+            start_minimized=args.minimized,
+            base_url=runtime_info.base_url,
+            auth_token=runtime_info.token,
+        )
+    except Exception:  # noqa: BLE001 -- log startup failures in windowed builds
+        logging.exception("STZ Downloader failed to start")
+        return 1
+    finally:
+        if runtime_info:
+            remove_runtime(runtime_info.instance_id)
+        if server:
+            server.should_exit = True
+        if server_thread:
+            server_thread.join(timeout=5.0)
+        if server_socket:
+            server_socket.close()
+        instance_lock.release()
 
 
 if __name__ == "__main__":

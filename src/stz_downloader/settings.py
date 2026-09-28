@@ -33,6 +33,9 @@ class Settings(BaseModel):
     intercept_all: bool = False          # ignore the filter and grab everything
     extensions: list[str] = Field(default_factory=lambda: list(DEFAULT_EXTENSIONS))
     connections: int = 8                 # default segments for new downloads
+    # Total download bandwidth shared by every active item. aria2 uses bytes
+    # per second; zero is its native representation for "unlimited".
+    download_limit_bps: int = Field(default=0, ge=0)
 
     # Watch the clipboard and offer to grab copied links. Off by default: it
     # means reading everything the user copies, so it must be a deliberate

@@ -38,6 +38,14 @@ ApplicationWindow {
         return s + "s"
     }
 
+    function limitMb(bytes) {
+        return Math.round(Math.max(0, Number(bytes) || 0) / (1024 * 1024))
+    }
+
+    function limitLabel(bytes) {
+        return limitMb(bytes) > 0 ? limitMb(bytes) + " MB/s" : i18n.strings.unlimited
+    }
+
     function statusLabel(s) {
         return i18n.strings["status_" + s] || s
     }
@@ -328,6 +336,11 @@ ApplicationWindow {
                                   + win.fmtDuration((modelData.total - modelData.completed) / modelData.speed)
                             color: win.textDim; font.pixelSize: 11
                         }
+                        Text {
+                            visible: (modelData.speedLimit || 0) > 0
+                            text: "≤ " + win.limitLabel(modelData.speedLimit)
+                            color: win.accent; font.pixelSize: 11
+                        }
                         Item { Layout.fillWidth: true }
 
                         ToolBtn {
@@ -341,6 +354,15 @@ ApplicationWindow {
                             tip: i18n.strings.reveal_file
                             visible: modelData.status === "complete" && modelData.path && modelData.path.length > 0
                             onClicked: backend.revealDownload(modelData.gid)
+                        }
+                        ToolBtn {
+                            text: "⇩"
+                            visible: modelData.status === "active"
+                                     || modelData.status === "waiting"
+                                     || modelData.status === "paused"
+                            tip: i18n.strings.speed_limit
+                            onClicked: speedDialog.openFor(
+                                modelData.gid, modelData.name, modelData.speedLimit || 0)
                         }
                         ToolBtn {
                             text: modelData.status === "paused" ? "▶" : "⏸"
@@ -415,6 +437,7 @@ ApplicationWindow {
             extList = (s.extensions || []).slice()
             extVersion++
             extWarning = ""
+            globalLimitInput.text = win.limitMb(s.download_limit_bps || 0).toString()
             settingsReady = Object.keys(s).length > 0
         }
 
@@ -677,6 +700,45 @@ ApplicationWindow {
                 }
             }
 
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+                Text {
+                    text: i18n.strings.global_speed_limit
+                    color: win.textMain; font.pixelSize: 13
+                }
+                Text {
+                    text: i18n.strings.global_speed_limit_sub
+                    color: win.textDim; font.pixelSize: 10
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    TextField {
+                        id: globalLimitInput
+                        Layout.fillWidth: true
+                        implicitHeight: 36
+                        text: "0"
+                        selectByMouse: true
+                        color: win.textMain
+                        placeholderText: "0"
+                        placeholderTextColor: win.textDim
+                        validator: IntValidator { bottom: 0; top: 2000 }
+                        background: Rectangle {
+                            radius: 8
+                            color: "#15181f"
+                            border.color: globalLimitInput.activeFocus ? win.accent : "#2a2f3a"
+                        }
+                        leftPadding: 12; rightPadding: 12
+                    }
+                    Text { text: "MB/s"; color: win.textDim; font.pixelSize: 12 }
+                }
+                Text {
+                    text: i18n.strings.zero_unlimited
+                    color: win.textDim; font.pixelSize: 10
+                }
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 Text {
@@ -868,9 +930,88 @@ ApplicationWindow {
                             minimize_to_tray: settingsDrawer.getS("minimize_to_tray", true),
                             disk_guard_enabled: settingsDrawer.getS("disk_guard_enabled", true),
                             disk_reserve_mb: settingsDrawer.getS("disk_reserve_mb", 2048),
+                            download_limit_bps: Math.round(
+                                Math.max(0, Number(globalLimitInput.text) || 0) * 1024 * 1024),
                             extensions: settingsDrawer.extList.slice()
                         })
                         settingsDrawer.close()
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- Per-download bandwidth limit -----------------------------
+    Dialog {
+        id: speedDialog
+        anchors.centerIn: parent
+        modal: true
+        width: Math.min(420, win.width - 60)
+        padding: 20
+        closePolicy: Popup.CloseOnEscape
+        property string gid: ""
+        property string downloadName: ""
+
+        function openFor(itemGid, itemName, bytesPerSecond) {
+            gid = itemGid
+            downloadName = itemName || ""
+            itemLimitInput.text = win.limitMb(bytesPerSecond).toString()
+            open()
+            itemLimitInput.forceActiveFocus()
+            itemLimitInput.selectAll()
+        }
+
+        background: Rectangle {
+            radius: 14; color: win.surface; border.color: "#2a2f3a"
+        }
+        contentItem: ColumnLayout {
+            spacing: 14
+            Text {
+                text: i18n.strings.speed_limit
+                color: win.textMain; font.pixelSize: 16; font.bold: true
+            }
+            Text {
+                Layout.fillWidth: true
+                text: speedDialog.downloadName
+                color: win.textDim; font.pixelSize: 12
+                elide: Text.ElideMiddle
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                TextField {
+                    id: itemLimitInput
+                    Layout.fillWidth: true
+                    implicitHeight: 38
+                    text: "0"
+                    selectByMouse: true
+                    color: win.textMain
+                    validator: IntValidator { bottom: 0; top: 2000 }
+                    background: Rectangle {
+                        radius: 8; color: "#15181f"
+                        border.color: itemLimitInput.activeFocus ? win.accent : "#2a2f3a"
+                    }
+                    leftPadding: 12; rightPadding: 12
+                    onAccepted: applyButton.clicked()
+                }
+                Text { text: "MB/s"; color: win.textDim; font.pixelSize: 12 }
+            }
+            Text {
+                text: i18n.strings.zero_unlimited
+                color: win.textDim; font.pixelSize: 10
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                OutlineBtn { text: i18n.strings.cancel; onClicked: speedDialog.close() }
+                Item { Layout.fillWidth: true }
+                AccentBtn {
+                    id: applyButton
+                    text: i18n.strings.apply
+                    onClicked: {
+                        backend.setSpeedLimit(
+                            speedDialog.gid,
+                            Math.round(Math.max(0, Number(itemLimitInput.text) || 0)
+                                       * 1024 * 1024))
+                        speedDialog.close()
                     }
                 }
             }
