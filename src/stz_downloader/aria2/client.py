@@ -77,6 +77,10 @@ class Aria2Client:
             options["header"] = header_lines
         return await self._call("aria2.addUri", uris, options)
 
+    async def add_uri_with_options(self, uris: list[str], options: dict[str, Any]) -> str:
+        """``aria2.addUri`` with a ready-made options dict (used to re-queue)."""
+        return await self._call("aria2.addUri", uris, options)
+
     async def remove(self, gid: str) -> str:
         return await self._call("aria2.remove", gid)
 

@@ -88,3 +88,21 @@ def test_global_limit_remains_saved_while_aria2_is_starting(tmp_path, monkeypatc
 
     assert response.status_code == 200
     assert persisted.json()["download_limit_bps"] == 10 * 1024 * 1024
+
+
+def test_limit_on_a_finished_download_is_a_conflict_not_a_crash(tmp_path, monkeypatch):
+    from stz_downloader.aria2.client import Aria2Error
+
+    async def change_option(self, gid, options):
+        raise Aria2Error("GID deadbeef is not found")
+
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr(Aria2Manager, "start", lambda self: None)
+    monkeypatch.setattr(Aria2Manager, "stop", lambda self: None)
+    monkeypatch.setattr(Aria2Client, "change_option", change_option)
+    with TestClient(create_app(Config())) as client:
+        response = client.post(
+            "/api/downloads/deadbeef/speed-limit", json={"bytes_per_second": 1024}
+        )
+
+    assert response.status_code == 409

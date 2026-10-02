@@ -1,7 +1,7 @@
 # Chrome Web Store & Mozilla AMO Listing — STZ Downloader Integration
 
 > Last Updated: 2026-09-11
-> Extension Version: 0.1.10
+> Extension Version: 0.2.0
 
 This document contains all listing copy, exact permissions justifications, privacy disclosures, and submission checklists required for publishing the extension to the **Chrome Web Store** and **Mozilla Add-ons (AMO)**.
 
@@ -121,7 +121,7 @@ https://github.com/starzynhobr/stz-downloader/blob/main/PRIVACY.md
    ```bash
    python scripts/package_extension.py
    ```
-   Output: `dist/stz-extension-chrome-0.1.10.zip`.
+   Output: `dist/stz-extension-chrome-0.2.0.zip`.
 2. **First Upload Note ("key" field)**:
    - For a **brand-new** item, the Chrome Web Store dashboard will reject a manifest containing the `"key"` attribute.
    - If rejected, temporarily remove `"key"` from `extension/manifest.chrome.json`, run `python scripts/package_extension.py`, and upload the zip.
@@ -140,7 +140,7 @@ https://github.com/starzynhobr/stz-downloader/blob/main/PRIVACY.md
    ```bash
    python scripts/package_extension.py
    ```
-   Output: `dist/stz-extension-firefox-0.1.10.zip`.
+   Output: `dist/stz-extension-firefox-0.2.0.zip`.
 2. **Submit to AMO**:
    Log into [addons.mozilla.org](https://addons.mozilla.org/) -> "Submit a New Add-on".
 3. **Select Distribution**:
@@ -154,5 +154,5 @@ https://github.com/starzynhobr/stz-downloader/blob/main/PRIVACY.md
 
 ## 6. Next Release Checklist
 
-- **Firefox `strict_min_version`:** bump `browser_specific_settings.gecko.strict_min_version` in `extension/manifest.firefox.json` from `115.0` to `140.0`. AMO warns that `data_collection_permissions` is only supported from Firefox 140 (Android 142); 115 was kept for the 0.1.10 submission.
+- Firefox `strict_min_version` is `140.0` since 0.2.0 (needed for `data_collection_permissions`).
 - Store IDs: Chrome `jhahaknbmgkbnhfnknclelilaoobmpcm`, Firefox `stz-downloader@stzlabs.com`. Updates are uploaded as new versions of the existing items; the listing stays as is.

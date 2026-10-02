@@ -7,13 +7,15 @@
 
 param(
     [switch]$SkipAppBuild,
+    # Package the Tauri desktop build (dist\stz-desktop) instead of the Qt one.
+    [switch]$Desktop,
     [string]$OutDir = "$PSScriptRoot\..\dist"
 )
 
 $ErrorActionPreference = "Stop"
 $root = Resolve-Path "$PSScriptRoot\.."
 $iss = Join-Path $root "packaging\inno\stz-downloader.iss"
-$appDir = Join-Path $OutDir "stz-downloader"
+$appDir = Join-Path $OutDir $(if ($Desktop) { "stz-desktop" } else { "stz-downloader" })
 
 function Find-ISCC {
     $cmd = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
@@ -33,12 +35,14 @@ $pyproject = Get-Content (Join-Path $root "pyproject.toml") -Raw
 if ($pyproject -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
     throw "Could not read version from pyproject.toml"
 }
-$version = $Matches[1]
+$appVersion = $Matches[1]
+$version = $appVersion
 while (($version.Split(".")).Count -lt 4) { $version = "$version.0" }
 
 if (-not $SkipAppBuild) {
     Write-Host "Building the frozen app..."
-    & (Join-Path $PSScriptRoot "build_windows.ps1") -OutDir $OutDir
+    $builder = if ($Desktop) { "build_desktop.ps1" } else { "build_windows.ps1" }
+    & (Join-Path $PSScriptRoot $builder) -OutDir $OutDir
 }
 
 if (-not (Test-Path (Join-Path $appDir "stz-downloader.exe"))) {
@@ -47,9 +51,18 @@ if (-not (Test-Path (Join-Path $appDir "stz-downloader.exe"))) {
 
 $iscc = Find-ISCC
 Write-Host "Compiling installer with $iscc (version $version)"
-& $iscc "/DAppVersion=$version" $iss
+$outputName = if ($Desktop) { "stz-downloader-$version-desktop-setup" } else { "stz-downloader-$version-setup" }
+& $iscc "/DAppVersion=$version" "/DSourceDir=$((Resolve-Path $appDir).Path)" "/DOutputName=$outputName" $iss
 if ($LASTEXITCODE -ne 0) {
     throw "ISCC failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "`nInstaller: $OutDir\stz-downloader-$version-setup.exe"
+# Checksums uploaded with the release; the in-app updater refuses to run an
+# installer whose SHA-256 is not listed here (or in GitHub's asset digest).
+$installer = Join-Path $OutDir "$outputName.exe"
+$sumsFile = Join-Path $OutDir "SHA256SUMS.txt"
+$sumsTargets = @(Get-Item $installer) + @(Get-ChildItem $OutDir -Filter "stz-extension-*-$appVersion.zip" -ErrorAction SilentlyContinue)
+$lines = foreach ($f in $sumsTargets) { "{0}  {1}" -f (Get-FileHash -Algorithm SHA256 $f.FullName).Hash.ToLower(), $f.Name }
+Set-Content -Path $sumsFile -Value $lines -Encoding ascii
+Write-Host "`nInstaller: $installer"
+Write-Host "Checksums: $sumsFile"

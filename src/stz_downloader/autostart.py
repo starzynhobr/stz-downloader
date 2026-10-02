@@ -16,6 +16,9 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "STZ Downloader"
 
 
+ENGINE_EXE = "stz-engine.exe"
+
+
 def supported() -> bool:
     return sys.platform == "win32"
 
@@ -26,7 +29,11 @@ def launch_command() -> str:
     ``--minimized`` so signing in doesn't throw a window in the user's face.
     """
     if getattr(sys, "frozen", False):
-        return f'"{sys.executable}" --minimized'
+        exe = Path(sys.executable)
+        # The headless engine sits beside the desktop shell; login should open
+        # the shell, which starts the engine itself.
+        shell = exe.with_name("stz-downloader.exe")
+        return f'"{shell if exe.name.lower() == ENGINE_EXE else exe}" --minimized'
     # Running from source: prefer pythonw so login doesn't flash a console.
     exe = Path(sys.executable)
     windowless = exe.with_name("pythonw.exe")

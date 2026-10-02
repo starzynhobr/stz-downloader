@@ -1,0 +1,26 @@
+[package]
+name = "stz-downloader-desktop"
+version = "0.2.0"
+description = "STZ Downloader desktop shell"
+authors = ["starzynhobr"]
+license = "MIT"
+repository = "https://github.com/starzynhobr/stz-downloader"
+edition = "2024"
+rust-version = "1.90"
+
+[lib]
+name = "stz_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "2.12.1", features = ["tray-icon"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+arboard = { version = "3", default-features = false }
+ureq = { version = "2", default-features = false, features = ["json"] }
+tauri-plugin-opener = "2"

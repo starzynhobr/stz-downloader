@@ -29,6 +29,7 @@ def test_normalize_download_includes_progress_speed_and_path():
         "speed": 5,
         "progress": 0.25,
         "error": "",
+        "errorCode": "",
         "path": r"C:\Downloads\example.zip",
     }
 
@@ -143,3 +144,12 @@ def test_url_re_accepts_plain_urls(text):
 )
 def test_url_re_rejects_non_urls(text):
     assert not URL_RE.match(text)
+
+
+def test_failed_download_without_a_path_is_named_from_its_url():
+    item = {
+        "gid": "x",
+        "status": "error",
+        "files": [{"path": "", "uris": [{"uri": "https://example.com/dir/old-build.zip?token=1"}]}],
+    }
+    assert _normalize(item)["name"] == "old-build.zip"

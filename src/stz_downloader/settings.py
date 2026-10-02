@@ -53,6 +53,9 @@ class Settings(BaseModel):
     # Closing the window hides it to the tray instead of quitting, so the
     # bridge keeps serving the browser extension and downloads keep running.
     minimize_to_tray: bool = True
+    # Look for a newer release on GitHub at startup and every few hours.
+    # Installing always waits for the user to click "Update".
+    auto_update_check: bool = True
 
 
 class SettingsStore:

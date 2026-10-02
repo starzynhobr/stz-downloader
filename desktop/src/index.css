@@ -1,0 +1,133 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* "Graphite": one dark ground, one brand accent. Numbers use the mono face so
+   they don't jitter as they change. */
+@theme {
+  --font-sans: "Geist Variable", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+
+  --color-ground: #0e0f11;
+  --color-rail: #121316;
+  --color-surface: #15171b;
+  --color-raised: #1b1d22;
+  --color-field: #0f1013;
+  --color-line: #1f2126;
+  --color-edge: #2e3138;
+  --color-track: #22252b;
+
+  --color-ink: #e8eaed;
+  --color-ink-strong: #f2f3f5;
+  --color-soft: #b4b9c2;
+  --color-dim: #9aa0aa;
+  --color-faint: #6f7580;
+
+  --color-brand: #6e9bff;
+  --color-on-brand: #0b1020;
+  --color-ok: #4ade80;
+  --color-warn: #f5b454;
+  --color-bad: #ff9b8a;
+}
+
+/* shadcn/ui components read these; they point at the Graphite palette. */
+@theme inline {
+  --color-background: var(--color-ground);
+  --color-foreground: var(--color-ink);
+  --color-card: var(--color-surface);
+  --color-card-foreground: var(--color-ink);
+  --color-popover: var(--color-raised);
+  --color-popover-foreground: var(--color-ink);
+  --color-primary: var(--color-brand);
+  --color-primary-foreground: var(--color-on-brand);
+  --color-secondary: var(--color-raised);
+  --color-secondary-foreground: var(--color-ink);
+  --color-muted: var(--color-raised);
+  --color-muted-foreground: var(--color-dim);
+  --color-accent: var(--color-raised);
+  --color-accent-foreground: var(--color-ink-strong);
+  --color-destructive: var(--color-bad);
+  --color-border: var(--color-edge);
+  --color-input: var(--color-edge);
+  --color-ring: var(--color-brand);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+}
+
+/* In the base layer so component utilities (e.g. a shadcn trigger's own
+   focus ring with outline-none) override these defaults instead of stacking
+   a second ring on top. */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-ground);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+
+  input,
+  textarea {
+    user-select: text;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+
+  /* Text fields sit in a bordered box that turns brand on focus-within; a
+     second outline on the bare input would draw a ring inside the ring. */
+  input:not([type="checkbox"]):not([type="radio"]):focus-visible {
+    outline: none;
+  }
+}
+
+/* Themed checkbox: the native one is a bright white square on the dark UI. */
+@utility checkbox {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border: 1.5px solid var(--color-edge);
+  border-radius: 5px;
+  background: var(--color-field);
+  cursor: pointer;
+  transition: background-color 120ms, border-color 120ms;
+
+  &:hover {
+    border-color: var(--color-faint);
+  }
+  &:checked {
+    border-color: var(--color-brand);
+    background: var(--color-brand)
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230b1020' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5 9-10'/%3E%3C/svg%3E")
+      center / 12px no-repeat;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

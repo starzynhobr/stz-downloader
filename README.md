@@ -5,9 +5,12 @@ interface em **QML (PySide6)** e o motor de download **aria2**. Inclui uma
 extensão de navegador (Manifest V3) que intercepta downloads e os repassa ao
 aria2 — a sensação "IDM".
 
+![STZ Downloader](assets/screenshots/desktop/queue.png)
+
 ## Instalação
 
-1. Baixe o instalador em [Releases](https://github.com/starzynhobr/stz-downloader/releases/latest).
+1. Baixe o `-desktop-setup.exe` em [Releases](https://github.com/starzynhobr/stz-downloader/releases/latest).
+   A partir da 0.2.0 o app se atualiza sozinho (com verificação SHA-256).
 2. Instale a extensão:
    [Firefox Add-ons](https://addons.mozilla.org/pt-BR/firefox/addon/stz-downloader-integration/) ·
    Chrome Web Store (em análise)

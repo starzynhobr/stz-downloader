@@ -44,3 +44,33 @@ def test_websocket_requires_the_same_runtime_token(protected_client):
         "/ws", headers={"Authorization": "Bearer test-token"}
     ):
         pass
+
+
+def test_websocket_accepts_the_token_as_a_query_parameter(protected_client):
+    with pytest.raises(WebSocketDisconnect):
+        with protected_client.websocket_connect("/ws?token=wrong"):
+            pass
+
+    with protected_client.websocket_connect("/ws?token=test-token"):
+        pass
+
+
+def test_desktop_ui_origin_passes_cors_preflight_without_a_token(protected_client):
+    response = protected_client.options(
+        "/api/downloads",
+        headers={
+            "Origin": "http://tauri.localhost",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://tauri.localhost"
+
+
+def test_other_origins_get_no_cors_grant(protected_client):
+    response = protected_client.get(
+        "/api/health",
+        headers={"Origin": "https://evil.example", "Authorization": "Bearer test-token"},
+    )
+    assert "access-control-allow-origin" not in response.headers

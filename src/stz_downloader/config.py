@@ -31,10 +31,12 @@ DEFAULT_ARIA2_EXTRA_ARGS = (
     "--continue=true",
     "--file-allocation=falloc",
     "--auto-file-renaming=true",
-    "--async-dns=true",
-    "--async-dns-server=1.1.1.1,8.8.8.8",
-    "--max-tries=5",
-    "--retry-wait=2",
+    # System resolver: follows VPN / network changes instead of fixed servers.
+    "--async-dns=false",
+    # Keep retrying through network drops (VPN switch, Wi-Fi hiccup); the
+    # user can still cancel. Permanent errors like 404 are not retried.
+    "--max-tries=0",
+    "--retry-wait=5",
     "--connect-timeout=15",
     "--timeout=30",
     "--lowest-speed-limit=0",

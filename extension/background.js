@@ -27,23 +27,65 @@ async function getLocal() {
   return { ...DEFAULTS, ...s };
 }
 
+// One long-lived host process instead of spawning a new one per message:
+// starting the host is the slow part of every hand-off. The host answers in
+// order, so pending requests are a FIFO queue.
+let _port = null;
+const _pending = [];
+
+function nativePort() {
+  if (_port) return _port;
+  const port = api.runtime.connectNative(NATIVE_HOST);
+  port.onMessage.addListener((response) => {
+    const waiter = _pending.shift();
+    if (waiter) waiter(response);
+  });
+  port.onDisconnect.addListener(() => {
+    if (_port === port) _port = null;
+    for (const waiter of _pending.splice(0)) waiter({ ok: false, error: "native host disconnected" });
+  });
+  _port = port;
+  return port;
+}
+
 async function nativeRequest(type, payload) {
-  const response = await api.runtime.sendNativeMessage(NATIVE_HOST, { type, payload });
+  let response;
+  try {
+    response = await new Promise((resolve) => {
+      _pending.push(resolve);
+      nativePort().postMessage({ type, payload });
+    });
+  } catch (e) {
+    // connectNative itself failed; fall back to a one-shot host.
+    response = await api.runtime.sendNativeMessage(NATIVE_HOST, { type, payload });
+  }
   if (!response?.ok) throw new Error(response?.error || "native host unavailable");
   return response.result;
 }
 
-// Cache the bridge settings briefly so we don't fetch on every event.
+// Serve the bridge settings from cache and refresh in the background, so a
+// download never waits on a settings round-trip once the cache is warm.
 let _cfg = null;
 let _cfgAt = 0;
+let _cfgRefresh = null;
+function refreshSettings() {
+  _cfgRefresh ??= nativeRequest("settings")
+    .then((cfg) => {
+      _cfg = cfg;
+      _cfgAt = Date.now();
+    })
+    .catch(() => {
+      /* keep stale cache or null */
+    })
+    .finally(() => {
+      _cfgRefresh = null;
+    });
+  return _cfgRefresh;
+}
+
 async function bridgeSettings() {
-  if (_cfg && Date.now() - _cfgAt < 8000) return _cfg;
-  try {
-    _cfg = await nativeRequest("settings");
-    _cfgAt = Date.now();
-  } catch (e) {
-    /* keep stale cache or null */
-  }
+  if (!_cfg) await refreshSettings();
+  else if (Date.now() - _cfgAt > 8000) refreshSettings();
   return _cfg;
 }
 
@@ -101,8 +143,16 @@ api.downloads.onCreated.addListener(async (item) => {
   if (!enabled) return;
   if (item.state === "complete") return; // already done (e.g. from cache)
 
+  // Hold the browser's copy while we decide, so it doesn't keep downloading
+  // during the hand-off. Resumed below if we end up not taking it.
+  const paused = await api.downloads.pause(item.id).then(() => true, () => false);
+  const release = () => (paused ? api.downloads.resume(item.id).catch(() => {}) : undefined);
+
   const cfg = await bridgeSettings();
-  if (!shouldIntercept(cfg, item.filename, item.finalUrl || item.url)) return;
+  if (!shouldIntercept(cfg, item.filename, item.finalUrl || item.url)) {
+    await release();
+    return;
+  }
 
   try {
     await sendToBridge(item, true);
@@ -113,6 +163,7 @@ api.downloads.onCreated.addListener(async (item) => {
   } catch (e) {
     // Bridge offline / refused: let the browser download normally.
     console.warn("stz-downloader bridge unavailable, falling back:", e);
+    await release();
   }
 });
 
@@ -135,3 +186,6 @@ api.contextMenus.onClicked.addListener(async (info) => {
     console.warn("stz-downloader send failed:", e);
   }
 });
+
+// Warm the host connection and settings cache as soon as the worker starts.
+refreshSettings();

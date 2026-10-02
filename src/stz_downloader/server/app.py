@@ -26,16 +26,21 @@ import secrets
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from .. import autostart
 from ..aria2 import Aria2Client, Aria2Manager
+from ..aria2.client import Aria2Error
 from ..config import Config
 from ..settings import SettingsStore
+from ..updater import Updater, UpdateError
 
 PROGRESS_KEYS = [
     "gid",
@@ -86,6 +91,7 @@ class SettingsPatch(BaseModel):
     disk_guard_enabled: bool | None = None
     disk_reserve_mb: int | None = None
     start_with_windows: bool | None = None
+    auto_update_check: bool | None = None
     minimize_to_tray: bool | None = None
 
 
@@ -141,6 +147,27 @@ def _with_on_disk_sizes(items: list[dict]) -> list[dict]:
     return out
 
 
+# aria2 error codes worth retrying: unknown (TLS handshake drops land here),
+# timeout, network problem, DNS failure, temporary server overload. aria2's own
+# --max-tries does not cover all of these (a TLS failure ends the download), so
+# the bridge re-queues them itself and aria2 resumes from the partial file.
+TRANSIENT_ERROR_CODES = {"1", "2", "6", "19", "29"}
+RETRY_DELAY_SECONDS = 5.0
+# Origins of the Tauri desktop UI: production (Windows serves the bundle from
+# http://tauri.localhost) and the Vite dev server.
+TAURI_ORIGINS = ["http://tauri.localhost", "tauri://localhost", "http://localhost:1420"]
+MAX_AUTO_RETRIES = 30
+_RETRY_OPTION_KEYS = (
+    "dir",
+    "header",
+    "referer",
+    "user-agent",
+    "split",
+    "max-connection-per-server",
+    "max-download-limit",
+)
+
+
 def _url_extension(url: str) -> str:
     """Extension of the file a URL points at, lowercased, query stripped."""
     name = url.split("?", 1)[0].split("#", 1)[0].rsplit("/", 1)[-1]
@@ -150,17 +177,23 @@ def _url_extension(url: str) -> str:
 def _normalize(item: dict) -> dict:
     files = item.get("files") or []
     path = files[0].get("path") if files else ""
+    name = (path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]) if path else ""
+    if not name and files and files[0].get("uris"):
+        # Failed before the server named the file: show the URL's last segment.
+        uri = files[0]["uris"][0].get("uri", "")
+        name = uri.split("?", 1)[0].split("#", 1)[0].rstrip("/").rsplit("/", 1)[-1]
     total = int(item.get("totalLength", 0) or 0)
     done = int(item.get("completedLength", 0) or 0)
     return {
         "gid": item.get("gid"),
         "status": item.get("status"),
-        "name": (path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]) if path else "",
+        "name": name,
         "total": total,
         "completed": done,
         "speed": int(item.get("downloadSpeed", 0) or 0),
         "progress": (done / total) if total else 0.0,
         "error": item.get("errorMessage", ""),
+        "errorCode": str(item.get("errorCode", "") or ""),
         "path": path,
     }
 
@@ -183,10 +216,13 @@ def _reveal_path(path: Path) -> None:
         subprocess.Popen(["xdg-open", str(path.parent)])
 
 
-def create_app(cfg: Config, auth_token: str | None = None) -> FastAPI:
+def create_app(
+    cfg: Config, auth_token: str | None = None, updater: Updater | None = None
+) -> FastAPI:
     manager = Aria2Manager(cfg.aria2, cfg.downloads.resolve_directory())
     client = Aria2Client(cfg.aria2.rpc_url, cfg.aria2.rpc_secret)
     store = SettingsStore()
+    updater = updater or Updater()
     clients: set[WebSocket] = set()
     pending: dict[str, dict] = {}  # id -> pending download awaiting confirmation
     # Hydrated once from aria2 for restored downloads and updated whenever the
@@ -199,15 +235,24 @@ def create_app(cfg: Config, auth_token: str | None = None) -> FastAPI:
     # to the front instead of opening another window; the UI watches this
     # counter in the broadcast rather than needing a channel of its own.
     focus_state: dict = {"count": 0}
+    # Auto-retry bookkeeping, keyed by file path so attempts accumulate across
+    # the new gid each re-queue gets: {"attempts": int, "due": monotonic}.
+    retry_state: dict[str, dict] = {}
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
         manager.start()
         app.state.limit_applier = asyncio.create_task(_restore_global_limit())
         app.state.broadcaster = asyncio.create_task(_broadcast_loop())
+        app.state.update_checker = asyncio.create_task(
+            updater.run_periodic(lambda: store.settings.auto_update_check)
+        )
         try:
             yield
         finally:
+            app.state.update_checker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await app.state.update_checker
             app.state.limit_applier.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await app.state.limit_applier
@@ -227,6 +272,16 @@ def create_app(cfg: Config, auth_token: str | None = None) -> FastAPI:
             if not secrets.compare_digest(supplied, expected):
                 return JSONResponse({"detail": "unauthorized local client"}, status_code=401)
         return await call_next(request)
+
+    # The Tauri desktop UI is a web page on its own origin. Added after the auth
+    # middleware so it wraps it: CORS preflights carry no token and must be
+    # answered before authentication runs.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=TAURI_ORIGINS,
+        allow_methods=["*"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
 
     async def _start(req: DownloadRequest) -> str:
         n = req.connections or store.settings.connections
@@ -340,6 +395,58 @@ def create_app(cfg: Config, auth_token: str | None = None) -> FastAPI:
             raise HTTPException(404, "download file not found")
         return path
 
+    async def _requeue(gid: str) -> str | None:
+        """Start a stopped download again as a new aria2 entry.
+
+        Keeps its URL, headers (cookies), referer, connections and limit, and
+        writes to the same file so aria2 continues the partial download.
+        Returns the new gid, or None when there is no URL to retry.
+        """
+        status = await client.tell_status(gid, ["files"])
+        files = status.get("files") or [{}]
+        uris = list(dict.fromkeys(u["uri"] for u in files[0].get("uris", [])))
+        if not uris:
+            return None
+        old = await client.get_option(gid)
+        options = {k: old[k] for k in _RETRY_OPTION_KEYS if k in old}
+        path = files[0].get("path") or ""
+        name = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        if name:
+            # Same file name and no renaming, so aria2 continues the partial
+            # file instead of starting a "name(1).ext" copy.
+            options["out"] = name
+        options["continue"] = "true"
+        options["auto-file-renaming"] = "false"
+        new_gid = await client.add_uri_with_options(uris, options)
+        if gid in download_limits:
+            download_limits[new_gid] = download_limits.pop(gid)
+        with contextlib.suppress(Exception):
+            await client.remove_download_result(gid)
+        return new_gid
+
+    async def _auto_retry(items: list[dict]) -> None:
+        """Re-queue downloads that died on a transient network error."""
+        now = time.monotonic()
+        for item in items:
+            key = item["path"] or item["gid"]
+            if item["status"] == "complete":
+                retry_state.pop(key, None)
+                continue
+            if item["status"] != "error" or item.get("errorCode") not in TRANSIENT_ERROR_CODES:
+                continue
+            state = retry_state.setdefault(key, {"attempts": 0, "due": None})
+            if state["attempts"] >= MAX_AUTO_RETRIES:
+                continue
+            if state["due"] is None:
+                state["due"] = now + RETRY_DELAY_SECONDS
+                continue
+            if now < state["due"]:
+                continue
+            if await _requeue(item["gid"]) is None:
+                continue
+            state["attempts"] += 1
+            state["due"] = None
+
     async def _broadcast_loop() -> None:
         while True:
             await asyncio.sleep(1.0)
@@ -351,6 +458,7 @@ def create_app(cfg: Config, auth_token: str | None = None) -> FastAPI:
                 items = await _snapshot()
                 disk = _disk_report(items)
                 await _disk_guard(items, disk)
+                await _auto_retry(items)
             except Exception:  # aria2 may be momentarily unavailable
                 continue
             if not clients:
@@ -367,6 +475,7 @@ def create_app(cfg: Config, auth_token: str | None = None) -> FastAPI:
                     # race against the bridge coming up.
                     "settings": store.settings.model_dump(),
                     "focus": focus_state["count"],
+                    "update": updater.snapshot(),
                 }
             except Exception:  # aria2 may be momentarily unavailable
                 continue
@@ -401,6 +510,9 @@ def create_app(cfg: Config, auth_token: str | None = None) -> FastAPI:
     @app.put("/api/settings")
     async def put_settings(patch: SettingsPatch) -> dict:
         changes = patch.model_dump(exclude_none=True)
+        if "start_with_windows" in changes and autostart.supported():
+            # Store what Windows actually accepted, not just what was asked.
+            changes["start_with_windows"] = autostart.apply(changes["start_with_windows"])
         if "download_limit_bps" in changes:
             limit = changes["download_limit_bps"]
             if limit < 0:
@@ -531,14 +643,48 @@ def create_app(cfg: Config, auth_token: str | None = None) -> FastAPI:
     async def set_speed_limit(gid: str, body: SpeedLimitRequest) -> dict:
         if body.bytes_per_second < 0:
             raise HTTPException(422, "speed limit cannot be negative")
-        await client.change_option(
-            gid, {"max-download-limit": str(body.bytes_per_second)}
-        )
+        try:
+            await client.change_option(
+                gid, {"max-download-limit": str(body.bytes_per_second)}
+            )
+        except Aria2Error as exc:
+            # aria2 only changes options on active, waiting or paused items.
+            raise HTTPException(409, f"download cannot be changed: {exc}") from exc
         download_limits[gid] = body.bytes_per_second
         return {
             "gid": gid,
             "bytes_per_second": body.bytes_per_second,
         }
+
+    # -- self-update ----------------------------------------------------
+    @app.get("/api/update")
+    async def update_state() -> dict:
+        return updater.snapshot()
+
+    @app.post("/api/update/check")
+    async def update_check() -> dict:
+        return await updater.check()
+
+    @app.post("/api/update/install")
+    async def update_install() -> dict:
+        try:
+            return await updater.install()
+        except UpdateError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post("/api/downloads/{gid}/restart")
+    async def restart_download(gid: str) -> dict:
+        """Start a cancelled or failed download again, IDM-style."""
+        try:
+            status = await client.tell_status(gid, ["status"])
+        except Aria2Error as exc:
+            raise HTTPException(404, "download not found") from exc
+        if status.get("status") not in ("error", "removed"):
+            raise HTTPException(409, "only cancelled or failed downloads can be restarted")
+        new_gid = await _requeue(gid)
+        if new_gid is None:
+            raise HTTPException(409, "download has no URL to restart from")
+        return {"gid": new_gid, "started": True}
 
     @app.post("/api/downloads/{gid}/open")
     async def open_download(gid: str) -> dict:
@@ -559,7 +705,11 @@ def create_app(cfg: Config, auth_token: str | None = None) -> FastAPI:
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
         if auth_token:
+            # Browsers cannot set headers on a WebSocket, so the web UI sends
+            # the token as a query parameter instead.
             supplied = ws.headers.get("Authorization", "")
+            if not supplied and ws.query_params.get("token"):
+                supplied = f"Bearer {ws.query_params['token']}"
             if not secrets.compare_digest(supplied, f"Bearer {auth_token}"):
                 await ws.close(code=1008, reason="unauthorized local client")
                 return
