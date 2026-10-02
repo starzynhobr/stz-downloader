@@ -63,6 +63,7 @@ $installer = Join-Path $OutDir "$outputName.exe"
 $sumsFile = Join-Path $OutDir "SHA256SUMS.txt"
 $sumsTargets = @(Get-Item $installer) + @(Get-ChildItem $OutDir -Filter "stz-extension-*-$appVersion.zip" -ErrorAction SilentlyContinue)
 $lines = foreach ($f in $sumsTargets) { "{0}  {1}" -f (Get-FileHash -Algorithm SHA256 $f.FullName).Hash.ToLower(), $f.Name }
-Set-Content -Path $sumsFile -Value $lines -Encoding ascii
+# LF line endings: the standard sha256sum format, readable by `sha256sum -c`.
+[IO.File]::WriteAllText($sumsFile, (($lines -join "`n") + "`n"))
 Write-Host "`nInstaller: $installer"
 Write-Host "Checksums: $sumsFile"
