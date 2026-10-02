@@ -5,6 +5,13 @@ interface em **QML (PySide6)** e o motor de download **aria2**. Inclui uma
 extensão de navegador (Manifest V3) que intercepta downloads e os repassa ao
 aria2 — a sensação "IDM".
 
+## Instalação
+
+1. Baixe o instalador em [Releases](https://github.com/starzynhobr/stz-downloader/releases/latest).
+2. Instale a extensão:
+   [Firefox Add-ons](https://addons.mozilla.org/pt-BR/firefox/addon/stz-downloader-integration/) ·
+   Chrome Web Store (em análise)
+
 O aplicativo permite limitar a velocidade total nas configurações e também
 definir um teto individual em cada download. O valor `0` remove o limite; o
 limite global é persistido e reaplicado ao iniciar, enquanto limites individuais
