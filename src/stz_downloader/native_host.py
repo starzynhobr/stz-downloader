@@ -67,11 +67,23 @@ def _launch_application() -> None:
         "stderr": subprocess.DEVNULL,
         "close_fds": True,
     }
-    if sys.platform == "win32":
-        kwargs["creationflags"] = (
-            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    if sys.platform != "win32":
+        subprocess.Popen(_application_command(), **kwargs)
+        return
+
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    # Browsers run a native host inside a Job object and kill the whole job
+    # when the host exits, which would take the freshly started app (and the
+    # download it just accepted) down with it. Breaking away keeps it alive.
+    try:
+        subprocess.Popen(
+            _application_command(),
+            creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB,
+            **kwargs,
         )
-    subprocess.Popen(_application_command(), **kwargs)
+    except OSError:
+        # The job forbids breakaway: starting inside it still beats not starting.
+        subprocess.Popen(_application_command(), creationflags=flags, **kwargs)
 
 
 class NativeBridgeClient:
