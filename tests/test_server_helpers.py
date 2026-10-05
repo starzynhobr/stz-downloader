@@ -1,13 +1,28 @@
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
 from stz_downloader.server.app import (
     URL_RE,
     _committed_bytes,
     _normalize,
+    _reveal_path,
     _url_extension,
 )
 
 GB = 1024 ** 3
+
+
+@pytest.mark.parametrize("name", ["file.zip", "my file.zip", "ação, versão final.zip"])
+def test_reveal_windows_quotes_only_the_selected_path(tmp_path, name):
+    path = tmp_path / "Download folder" / name
+    with (
+        patch("stz_downloader.server.app.sys.platform", "win32"),
+        patch("stz_downloader.server.app.subprocess.Popen") as popen,
+    ):
+        _reveal_path(Path(path))
+    popen.assert_called_once_with(f'explorer.exe /select,"{path.resolve()}"')
 
 
 def test_normalize_download_includes_progress_speed_and_path():

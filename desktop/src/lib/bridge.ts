@@ -61,6 +61,7 @@ export interface Disk {
 }
 
 export interface Snapshot {
+  browserDownloads?: number
   items: Download[]
   pending: Pending[]
   global: { downloadSpeed: number; numActive: number }
@@ -108,6 +109,7 @@ export function useBridge() {
     let socket: WebSocket | null = null
     let retry: ReturnType<typeof setTimeout> | undefined
     let stopped = false
+    let browserDownloads = 0
 
     const connect = async () => {
       try {
@@ -122,6 +124,15 @@ export function useBridge() {
           const data = JSON.parse(event.data)
           if (data.type !== 'downloads') return
           const next = data as Snapshot
+          const count = next.browserDownloads
+          if (count !== undefined) {
+            if (count > browserDownloads && isTauri()) {
+              void invoke('notify_browser_download').catch(console.error)
+            }
+            // Restored items don't increment this session counter. Keep it
+            // across reconnects so missed downloads still request attention.
+            browserDownloads = count
+          }
           setSnapshot((prev) => (saving.current && prev ? { ...next, settings: prev.settings } : next))
         }
         ws.onclose = () => {

@@ -1,6 +1,6 @@
 [package]
 name = "stz-downloader-desktop"
-version = "0.2.1"
+version = "0.2.2"
 description = "STZ Downloader desktop shell"
 authors = ["starzynhobr"]
 license = "MIT"

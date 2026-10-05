@@ -209,7 +209,9 @@ def _open_path(path: Path) -> None:
 
 def _reveal_path(path: Path) -> None:
     if sys.platform == "win32":
-        subprocess.Popen(["explorer", f"/select,{path}"])
+        # Explorer needs quotes around the path only. Passing a list makes
+        # subprocess quote the entire /select argument when it contains spaces.
+        subprocess.Popen(f'explorer.exe /select,"{path.resolve()}"')
     elif sys.platform == "darwin":
         subprocess.Popen(["open", "-R", str(path)])
     else:
@@ -235,6 +237,7 @@ def create_app(
     # to the front instead of opening another window; the UI watches this
     # counter in the broadcast rather than needing a channel of its own.
     focus_state: dict = {"count": 0}
+    browser_downloads: dict = {"count": 0}
     # Auto-retry bookkeeping, keyed by file path so attempts accumulate across
     # the new gid each re-queue gets: {"attempts": int, "due": monotonic}.
     retry_state: dict[str, dict] = {}
@@ -475,6 +478,7 @@ def create_app(
                     # race against the bridge coming up.
                     "settings": store.settings.model_dump(),
                     "focus": focus_state["count"],
+                    "browserDownloads": browser_downloads["count"],
                     "update": updater.snapshot(),
                 }
             except Exception:  # aria2 may be momentarily unavailable
@@ -549,6 +553,8 @@ def create_app(
             }
             return {"pending": pid}
         gid = await _start(req)
+        if req.from_browser:
+            browser_downloads["count"] += 1
         return {"gid": gid, "started": True}
 
     @app.post("/api/clipboard")
@@ -623,6 +629,7 @@ def create_app(
             "disk": _disk_report(items),
             "settings": store.settings.model_dump(),
             "focus": focus_state["count"],
+            "browserDownloads": browser_downloads["count"],
         }
 
     @app.post("/api/downloads/{gid}/pause")

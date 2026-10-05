@@ -93,6 +93,30 @@ fn show_main(app: &AppHandle) {
     }
 }
 
+/// A browser download should be noticeable without taking keyboard focus.
+#[tauri::command]
+fn notify_browser_download(app: AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        if let Some(win) = handle.get_webview_window("main") {
+            #[cfg(windows)]
+            if !win.is_visible().unwrap_or(true) {
+                // A hidden tray window has no taskbar button. Show it minimized
+                // without activation, unlike show_main's explicit user action.
+                #[link(name = "user32")]
+                unsafe extern "system" {
+                    fn ShowWindow(hwnd: *mut std::ffi::c_void, command: i32) -> i32;
+                }
+                if let Ok(hwnd) = win.hwnd() {
+                    // SAFETY: this is our live window, on its owning UI thread.
+                    unsafe { ShowWindow(hwnd.0 as _, 7 /* SW_SHOWMINNOACTIVE */); }
+                }
+            }
+            let _ = win.request_user_attention(Some(tauri::UserAttentionType::Informational));
+        }
+    }).map_err(|e| e.to_string())
+}
+
 fn stop_backend(app: &AppHandle) {
     if let Some(mut child) = app.state::<Backend>().0.lock().unwrap().take() {
         let _ = child.kill();
@@ -107,7 +131,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(Backend(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![bridge_info])
+        .invoke_handler(tauri::generate_handler![bridge_info, notify_browser_download])
         .setup(|app| {
             // If a bridge is already running (another copy, or the old Qt app),
             // the headless process hands off to it and exits; the UI then finds
